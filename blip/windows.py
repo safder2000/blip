@@ -933,3 +933,97 @@ class TasksWindow(kit.Window):
                 icon="check").pack(side="left")
         if it.get("url"):
             IconBtn(btns, "open", lambda: webbrowser.open(it["url"])).pack(side="left", padx=(round(4 * S), 0))
+
+
+# ------------------------------------------------------------------ first run
+def full_windows_name():
+    """The signed-in user's display name (e.g. 'Safder Ali'), or '' if Windows doesn't know it."""
+    import ctypes
+    import sys
+    if sys.platform != "win32":
+        return ""
+    try:
+        fn = ctypes.windll.secur32.GetUserNameExW
+        size = ctypes.c_ulong(0)
+        fn(3, None, ctypes.byref(size))          # NameDisplay
+        if not size.value:
+            return ""
+        buf = ctypes.create_unicode_buffer(size.value + 1)
+        if fn(3, buf, ctypes.byref(size)):
+            return buf.value.strip()
+    except Exception:
+        pass
+    return ""
+
+
+class WelcomeWindow(kit.Window):
+    title = "Welcome to Blip"
+    icon = "heart"
+    subtitle = "Two quick things and you're set."
+
+    def build(self, f):
+        app, S = self.app, self.S
+        cfg, st = app.cfg, app.st
+        self.top.protocol("WM_DELETE_WINDOW", self.finish)
+        card = Card(f)
+        card.pack(fill="x")
+        b = card.body
+        label(b, "What's your name?", "h2").pack(anchor="w")
+        muted(b, "Colleagues see this name with your pet when you call or message them.").pack(
+            anchor="w", pady=(round(2 * S), round(8 * S)))
+        guess = cfg["display_name"]
+        if not cfg.get("named"):
+            guess = full_windows_name() or guess.replace(".", " ").replace("_", " ").title()
+        self.name = Field(b, guess, width=30)
+        self.name.pack(anchor="w", fill="x")
+
+        section(f, "Pick your pet")
+        self.pal = app.palette() if app.palette() in PALETTES else "gold"
+        grid = tk.Frame(f, bg=BG)
+        grid.pack(fill="x")
+        self.tiles = {}
+        for i, (key, nm) in enumerate(SPECIES.items()):
+            t = SpeciesTile(grid, key, nm, self.pal, lambda k=key: self.pick(species=k))
+            t.grid(row=i // 4, column=i % 4, padx=(0, round(8 * S)), pady=(0, round(8 * S)), sticky="w")
+            self.tiles[key] = t
+        sw = tk.Frame(f, bg=BG)
+        sw.pack(fill="x", pady=(round(4 * S), 0))
+        self.swatches = {}
+        for c in COLORS:
+            s = Swatch(sw, c, lambda c=c: self.pick(color=c))
+            s.pack(side="left", padx=(0, round(6 * S)))
+            self.swatches[c] = s
+        row = tk.Frame(f, bg=BG)
+        row.pack(fill="x", pady=(round(14 * S), 0))
+        label(row, "Pet's name").pack(side="left")
+        self.pet = Field(row, st["name"], width=14)
+        self.pet.pack(side="left", padx=(round(10 * S), 0))
+        Btn(row, "Let's go!", self.finish, kind="primary", icon="heart").pack(side="right")
+        self.name.entry.bind("<Return>", lambda e: self.finish())
+        self.mark()
+        self.top.after(200, lambda: (self.name.entry.focus_force(), self.name.entry.select_range(0, "end")))
+
+    def pick(self, species=None, color=None):
+        self.app.set_look(species=species, color=color)
+        self.mark()
+
+    def mark(self):
+        app = self.app
+        pal = app.palette() if app.palette() in PALETTES else "gold"
+        for k, t in self.tiles.items():
+            t.set(sel=(k == app.species()), palette=pal)
+        for c, s in self.swatches.items():
+            s.set(c == app.st.get("color", "auto"))
+
+    def finish(self):
+        app = self.app
+        name = self.name.get().strip()[:24] or app.cfg["display_name"]
+        pet = self.pet.get().strip()[:16] or app.st["name"]
+        app.cfg.update(display_name=name, named=True)
+        app.cfg.save()
+        app.st["name"] = pet
+        app.save()
+        app.net_rescan()
+        self.close()
+        app.say(f"hi {name.split()[0]}! I'm {pet}", 6)
+        app.happy_until = time.monotonic() + 4

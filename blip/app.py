@@ -23,6 +23,7 @@ from . import kit
 from . import updater as upd
 from . import windows as W
 from .menu import PopMenu
+from .tray import Tray
 
 FAST = 60.0 if "--fast" in sys.argv else 1.0
 HOUR = 3600.0
@@ -221,10 +222,17 @@ class App:
         self.anim()
         root.after(1000, self.sim)
         root.after(100, self.pump)
+        self.tray = None
+        self.temp_shown = False
+        if not self.st.get("visible", True):
+            self._set_visible(False)
         if start_services:
             self.start_net()
+            self.tray = Tray(self)
             root.after(int(random.uniform(60, 120) * 1000), self._update_loop)
             root.after(15000, self._bc_loop)
+            if not self.cfg.get("named"):
+                root.after(1200, lambda: self.open_window("welcome"))
 
     # ------------------------------------------------ plumbing
     def post(self, fn, *args):
@@ -350,6 +358,9 @@ class App:
     def start_alert(self, key, sound="ring", dash=False):
         self.alerts[key] = sound
         self.sound.play(sound, loop=True)
+        if not self.st.get("visible", True) and not self.temp_shown:
+            self.temp_shown = True          # hidden pets pop out while something rings
+            self._set_visible(True)
         if self.st["asleep"] and not self.st["gone"]:
             self.st["asleep"] = False
         if dash:
@@ -370,6 +381,9 @@ class App:
             self.ring_target = None
             if self.action == "ring":
                 self.choose()
+            if self.temp_shown and not self.st.get("visible", True):
+                self.temp_shown = False
+                self.root.after(1500, lambda: self.st.get("visible", True) or self._set_visible(False))
 
     # ------------------------------------------------ loops
     def physics(self):
@@ -476,6 +490,10 @@ class App:
         for it in self.timers.tick(now):
             self.timer_fired(it)
         self.nag()
+        if self.tray and self.frame % 40 < 4:
+            n = len(self.net.online()) if self.net else 0
+            self.tray.set_title(f"Blip - {self.st['name']} is {self.mood_word()}"
+                                + (f"  ·  {n} nearby" if n else "") + ("  ·  do not disturb" if self.cfg["dnd"] else ""))
         if time.monotonic() - self.last_save > 30:
             self.save()
         self.root.after(1000, self.sim)
@@ -929,6 +947,8 @@ class App:
         if color:
             self.st["color"] = color
         self.refresh_icon()
+        if self.tray:
+            self.tray.set_look(self.species(), self.palette())
         self.draw()
         self.net_rescan()
         self.save()
@@ -970,6 +990,8 @@ class App:
         self.var_dnd.set(self.cfg["dnd"])
         self.net_rescan()
         self.say("do not disturb: on" if on else "do not disturb: off", 3)
+        if self.tray:
+            self.tray.refresh_menu()
 
     def log_inbox(self, direction, peer, name, text):
         self.inbox.append({"ts": time.time(), "dir": direction, "peer": peer, "name": name, "text": text[:500]})
@@ -1227,6 +1249,8 @@ class App:
         self.save()
         if self.net:
             self.net.stop()
+        if self.tray:
+            self.tray.stop()
         upd.launch_installer(path)
         self.root.after(300, self.root.destroy)
 
@@ -1483,7 +1507,7 @@ class App:
                 w.show(page)
             return w
         cls = {"timers": W.TimersWindow, "buddies": W.BuddiesWindow, "tasks": W.TasksWindow,
-               "settings": W.SettingsWindow}[name]
+               "settings": W.SettingsWindow, "welcome": W.WelcomeWindow}[name]
         self.windows[name] = w = cls(self)
         if page and hasattr(w, "show"):
             w.show(page)
@@ -1517,7 +1541,43 @@ class App:
         self.sound.stop()
         if self.net:
             self.net.stop()
+        if self.tray:
+            self.tray.stop()
         self.root.destroy()
+
+    # ------------------------------------------------ tray helpers
+    def work_at(self, x, y):
+        return work_area_at(self.root, x, y)
+
+    def menu_at_cursor(self):
+        class E:
+            pass
+        e = E()
+        e.x_root, e.y_root = self.root.winfo_pointerxy()
+        e.x_root -= round(130 * self.S)
+        e.y_root -= round(40 * self.S)
+        self.on_menu(e)
+
+    def _set_visible(self, on):
+        wins = [self.root] + [w for w, _ in self.poop_wins]
+        for w in wins:
+            try:
+                (w.deiconify if on else w.withdraw)()
+            except tk.TclError:
+                pass
+        if on:
+            self.root.attributes("-topmost", True)
+
+    def toggle_visible(self):
+        on = not self.st.get("visible", True)
+        self.st["visible"] = on
+        self.temp_shown = False
+        self._set_visible(on)
+        if on:
+            self.say("I'm back!", 3)
+        self.save()
+        if self.tray:
+            self.tray.refresh_menu()
 
 
 def main():

@@ -98,7 +98,7 @@ class Basecamp:
         return bool(self.cfg.get("bc_token") and self.cfg.get("bc_account"))
 
     def client_creds(self):
-        return (self.cfg.get("bc_client_id") or _CID, self.cfg.get("bc_client_secret") or _CSECRET)
+        return ((self.cfg.get("bc_client_id") or _CID).strip(), (self.cfg.get("bc_client_secret") or _CSECRET).strip())
 
     def disconnect(self):
         self.cfg.update(bc_token="", bc_refresh="", bc_expires=0, bc_account="", bc_account_name="")

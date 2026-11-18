@@ -72,7 +72,7 @@ class PopMenu:
         self.draw_content()
 
         # ---- place
-        l, t, r, b = app.work
+        l, t, r, b = app.work_at(x if anchor_right is None else anchor_right[1], y)
         if anchor_right is not None:     # submenu: to the right of the parent, else to its left
             px0, px1 = anchor_right
             x = px1 - p if px1 + W < r else px0 - W - p

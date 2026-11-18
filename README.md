@@ -21,6 +21,10 @@ No admin rights needed. It installs to `%LOCALAPPDATA%\Programs\Blip` and starts
 - **Left-click** pat · **drag** pick up · **right-click** for the menu (care buttons, timers, calls, settings).
 - Click a poop to clean it. Click the timer sign to open *Timers & alarms*.
 - **Settings → Pet** to pick a look (Blip, Kitty, Bunny, Bear, Pup, Chick, Bot) and a colour.
+  The first time Blip starts it asks your name and lets you pick your pet; colleagues see both.
+- Blip also lives in the **system tray** (the ^ next to the clock): click it for the menu,
+  right-click for shortcuts, or untick *Show pet on desktop* to keep just the tray icon.
+  A hidden pet still pops out when someone calls or an alarm rings.
 
 ### Calls and messages (office network)
 
