@@ -240,3 +240,20 @@ def open_path(path):
         subprocess.Popen(["open", path])
     else:
         subprocess.Popen(["xdg-open", path])
+
+
+def system_dark():
+    """True when the OS is set to dark mode for apps."""
+    try:
+        if WIN:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as k:
+                return winreg.QueryValueEx(k, "AppsUseLightTheme")[0] == 0
+        if MAC:
+            r = subprocess.run(["defaults", "read", "-g", "AppleInterfaceStyle"], capture_output=True, text=True,
+                               timeout=3)
+            return "dark" in r.stdout.lower()
+    except Exception:
+        pass
+    return True

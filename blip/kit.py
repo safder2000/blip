@@ -10,18 +10,37 @@ import tkinter.font as tkfont
 
 from .sprites import COL, GH, GW, ICON, PALETTES, build_egg, build_pet, draw_text, text_width
 
-BG = "#f5f3fa"
-SURFACE = "#ffffff"
-LINE = "#e6e0f0"
-INK = COL["out"]
-MUTED = "#7b7393"
-ACCENT = "#6b7fd7"
-ACCENT_DK = "#5869c4"
-ACCENT_SOFT = "#eef0fc"
-HOVER = "#f2eff9"
-OK = "#34b37a"
-WARN = "#eea320"
-DANGER = "#e5484d"
+THEMES = {
+    "light": dict(
+        BG="#f5f3fa", SURFACE="#ffffff", LINE="#e6e0f0", INK=COL["out"], MUTED="#7b7393",
+        ACCENT="#6b7fd7", ACCENT_DK="#5869c4", ACCENT_SOFT="#eef0fc", ACCENT_SOFT2="#e2e6fa", ON_ACCENT="#ffffff",
+        HOVER="#f2eff9", OK="#34b37a", WARN="#eea320", WARN_INK="#b7791f", WARN_SOFT="#fdf3df",
+        DANGER="#e5484d", DANGER_SOFT="#fdeeee", OFF="#b9b3c8", OFF_FILL="#c9cff0", TRACK="#d8d2e6",
+        TRACK_SOFT="#ece8f4", TRACK_LIT="#d9d3e6", BORDER_HOV="#cfc6e2", PLACEHOLDER="#a9a2bd", TILE="#f7f5fb",
+        KNOB="#ffffff", FRAME=COL["out"], SHADOW=COL["out"], PAPER="#fffdf7", PAPER_INK=COL["out"],
+        PAPER_BTN="#ffffff"),
+    "dark": dict(
+        BG="#16141d", SURFACE="#201d29", LINE="#302c3d", INK="#ece8f6", MUTED="#9a93b0",
+        ACCENT="#8496ec", ACCENT_DK="#6b7fd7", ACCENT_SOFT="#282b47", ACCENT_SOFT2="#323659", ON_ACCENT="#ffffff",
+        HOVER="#292534", OK="#3ec58a", WARN="#f0b040", WARN_INK="#f2c56a", WARN_SOFT="#382e1b",
+        DANGER="#f0646a", DANGER_SOFT="#3a2027", OFF="#5f5973", OFF_FILL="#363a5c", TRACK="#3b3649",
+        TRACK_SOFT="#2b2736", TRACK_LIT="#4a4459", BORDER_HOV="#4a4459", PLACEHOLDER="#6f6886", TILE="#25222f",
+        KNOB="#ffffff", FRAME="#4d4762", SHADOW="#07060a", PAPER="#221f2c", PAPER_INK="#ece8f6",
+        PAPER_BTN="#2e2a3b"),
+}
+THEME = "dark"
+globals().update(THEMES[THEME])
+
+
+def set_theme(name):
+    """'dark', 'light' or 'system'. Windows opened afterwards use the new colours."""
+    global THEME
+    if name == "system":
+        from .plat import system_dark
+        name = "dark" if system_dark() else "light"
+    THEME = name if name in THEMES else "dark"
+    globals().update(THEMES[THEME])
+    return THEME
 
 F = {}
 
@@ -68,10 +87,11 @@ def bg_of(w):
         return BG
 
 
-def tint_titlebar(top, caption=BG, text=INK, border=LINE):
+def tint_titlebar(top, caption=None, text=None, border=None):
     """Windows 11: colour the native title bar to match the window."""
     if sys.platform != "win32":
         return
+    caption, text, border = caption or BG, text or INK, border or LINE
     try:
         top.update_idletasks()
         hwnd = ctypes.windll.user32.GetParent(top.winfo_id())
@@ -102,14 +122,17 @@ def pet_photo(root, species="blip", palette="gold", size=32):
 
 
 # ------------------------------------------------------------------ buttons
-class Btn(tk.Canvas):
-    STYLES = {
-        "primary": (ACCENT, ACCENT_DK, "#ffffff", ACCENT),
+def btn_styles():
+    return {
+        "primary": (ACCENT, ACCENT_DK, ON_ACCENT, ACCENT),
         "secondary": (SURFACE, HOVER, INK, LINE),
         "ghost": (None, HOVER, INK, None),
-        "danger": (SURFACE, "#fdeeee", DANGER, LINE),
-        "soft": (ACCENT_SOFT, "#e2e6fa", ACCENT_DK, ACCENT_SOFT),
+        "danger": (SURFACE, DANGER_SOFT, DANGER, LINE),
+        "soft": (ACCENT_SOFT, ACCENT_SOFT2, ACCENT if THEME == "dark" else ACCENT_DK, ACCENT_SOFT),
     }
+
+
+class Btn(tk.Canvas):
 
     def __init__(self, parent, text="", command=None, kind="secondary", icon=None, small=False,
                  width=None, tip=None):
@@ -153,15 +176,15 @@ class Btn(tk.Canvas):
 
     def draw(self):
         self.delete("all")
-        fill, hov, fg, border = self.STYLES[self.kind]
+        fill, hov, fg, border = btn_styles()[self.kind]
         bg = bg_of(self)
         fill = fill or bg
         if self.hover:
             fill = hov
         if not self.enabled:
-            fg = "#b9b3c8"
+            fg = OFF
             if self.kind == "primary":
-                fill, border = "#c9cff0", "#c9cff0"
+                fill, border = OFF_FILL, OFF_FILL
         p = self.p
         if border:
             framed_box(self, 0, 0, self.w, self.h, p, border, fill)
@@ -199,11 +222,11 @@ class Toggle(tk.Canvas):
     def draw(self):
         self.delete("all")
         p, w, h = self.p, self.w, self.h
-        pixel_box(self, 0, 0, w, h, p, ACCENT if self.value else "#d8d2e6")
+        pixel_box(self, 0, 0, w, h, p, ACCENT if self.value else TRACK)
         m = round(3 * p / 2) + 1
         k = h - 2 * m
         x0 = w - m - k if self.value else m
-        pixel_box(self, x0, m, x0 + k, m + k, p, "#ffffff")
+        pixel_box(self, x0, m, x0 + k, m + k, p, KNOB)
 
 
 class VolumeSlider(tk.Canvas):
@@ -269,7 +292,7 @@ class VolumeSlider(tk.Canvas):
         p = px_of(self, 2)
         lvl = self.value // 10
         on = self.enabled
-        ink = INK if on else "#b9b3c8"
+        ink = INK if on else OFF
         sy = (self.h - 7 * p) / 2
         draw_text(self, 0, sy, ICON["speaker"], p, ink)
         if lvl == 0:
@@ -283,11 +306,11 @@ class VolumeSlider(tk.Canvas):
             x = self.x0 + i * (self.bw + self.gap)
             bh = round(8 * S + (self.h - 10 * S) * (i + 1) / self.n)
             lit = i < lvl
-            col = self.BAR_COLORS[i] if (lit and on) else ("#d9d3e6" if lit else "#ece8f4")
+            col = self.BAR_COLORS[i] if (lit and on) else (TRACK_LIT if lit else TRACK_SOFT)
             pixel_box(self, x, self.h - bh, x + self.bw, self.h, p, col)
         pct = "Mute" if lvl == 0 else f"{self.value}%"
         self.create_text(self.w - round(4 * S), self.h / 2, text=pct, anchor="e", font=F["small"],
-                         fill=MUTED if on else "#b9b3c8")
+                         fill=MUTED if on else OFF)
 
 
 class Field(tk.Frame):
@@ -316,7 +339,7 @@ class Field(tk.Frame):
     def _put_placeholder(self):
         if self.placeholder and not self.entry.get():
             self._ph = True
-            self.entry.config(fg="#a9a2bd", show="")
+            self.entry.config(fg=PLACEHOLDER, show="")
             self.entry.insert(0, self.placeholder)
 
     def _in(self, e):

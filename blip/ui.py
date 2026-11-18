@@ -6,7 +6,6 @@ from .sprites import COL, ICON, draw_text, text_width
 
 from .plat import KEY, make_transparent
 INK = COL["out"]
-PAPER = "#fffdf7"
 ACCENT = {
     "call": "#3fb67a", "msg": "#6b7fd7", "alarm": "#ef5b6b", "timer": "#f0a020",
     "task": "#2f8fd8", "info": "#9a7cc8", "update": "#2fb5a8",
@@ -63,7 +62,7 @@ class PixelCard:
         y = p + hh + pad
         if body:
             t = self.body_id = cv.create_text(2 * p + pad, y, text=body, anchor="nw", width=W - 4 * p - 2 * pad,
-                                              font=kit.F["body"], fill=INK, tags="fg")
+                                              font=kit.F["body"], fill=kit.PAPER_INK, tags="fg")
             y = cv.bbox(t)[3] + pad
         # buttons, right-aligned, wrapping
         bh = 7 * p + 8 * p
@@ -84,8 +83,8 @@ class PixelCard:
             bx = W - 2 * p - pad - total
             for label, cb, bw in row:
                 tag = f"b{id(cb)}_{bx}"
-                fill = accent if first else "#ffffff"
-                fg = "#ffffff" if first else INK
+                fill = accent if first else kit.PAPER_BTN
+                fg = "#ffffff" if first else kit.PAPER_INK
                 pixel_box(cv, bx, y, bx + bw, y + bh, p, INK, (tag, "fg"))
                 pixel_box(cv, bx + p, y + p, bx + bw - p, y + bh - p, p, fill, (tag, "fg", tag + "f"))
                 draw_text(cv, bx + 6 * p, y + 4 * p, label.upper(), p, fg, (tag, "fg"))
@@ -102,7 +101,7 @@ class PixelCard:
         # frame: shadow, ink border, paper, accent header
         pixel_box(cv, 2 * p, 2 * p, W, H + 2 * p, p, INK, "bg")
         pixel_box(cv, 0, 0, W - 2 * p, H, p, INK, "bg")
-        pixel_box(cv, p, p, W - 3 * p, H - p, p, PAPER, "bg")
+        pixel_box(cv, p, p, W - 3 * p, H - p, p, kit.PAPER, "bg")
         cv.create_rectangle(2 * p, p, W - 4 * p, p + hh, fill=accent, width=0, tags=("bg", "head"))
         cv.create_rectangle(p, 2 * p, W - 3 * p, p + hh, fill=accent, width=0, tags=("bg", "head"))
         cv.create_rectangle(p, p + hh, W - 3 * p, p + hh + p, fill=INK, width=0, tags="bg")

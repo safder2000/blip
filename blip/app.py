@@ -86,6 +86,7 @@ def cry(species, mood="happy"):
         "music": [f"\u266a {a}~", f"{b} \u266a", f"\u266a\u266a {a}"],
         "oops": [f"{a}...!", f"{A}?!"],
         "wow": [f"{A}!!", f"{A}~!!", f"{b} {b}!!"],
+        "dizzy": [f"{a}~ @_@", "@_@", f"{b}... @"],
     }
     return random.choice(forms.get(mood, forms["happy"]))
 
@@ -131,7 +132,9 @@ class App:
         root.report_callback_exception = self._on_error
         root.title("Blip")
         kit.init(root)
+        kit.set_theme(self.cfg["theme"])
         W.style(root)
+        self.update_state = None
         self.menu = None
         S = self.S = plat.ui_scale(root)
         self.P = max(3, round(4 * S))
@@ -175,6 +178,7 @@ class App:
         self.action, self.action_until = "idle", 0.0
         self.dir = random.choice((-1, 1))
         self.vy, self.airborne, self.land = 0.0, False, 0
+        self.vx, self.chute, self.bounces, self.trail = 0.0, 0, 0, []
         self.phase = 0.0
         self.food, self.food_t0 = None, 0.0
         self.particles = []
@@ -341,6 +345,8 @@ class App:
             return "normal"
         if a == "held":
             return "held"
+        if a == "fall" and self.airborne:
+            return "happy" if self.chute else "held"
         if a == "ring":
             return "alert"
         if self.voice and self.voice.level_out > 0.12 and self.frame % 2:
@@ -416,8 +422,12 @@ class App:
             self.phase += 0.04
             target = ground - 30 * self.S + math.sin(self.phase) * 6 * self.S
             self.y += (target - self.y) * 0.05
+        elif a == "fall" and (self.airborne or self.y < ground - 0.5):
+            self.airborne = True
+            self.fly(ground, lo, hi)
         elif self.airborne or self.y < ground - 0.5:
             self.airborne = True
+            self.chute = 0
             self.vy += 0.9 * self.S
             self.y += self.vy
             if a == "play":
@@ -430,6 +440,11 @@ class App:
                     self.jump()
         else:
             self.y = ground
+            if abs(self.vx) > 0.3 * self.S:      # skid after a throw
+                self.x += self.vx
+                self.vx *= 0.8
+            else:
+                self.vx = 0.0
             if a == "walk":
                 self.x += self.dir * (0.7 if self.st["sick"] else 1.5) * self.S
             elif a == "play" and time.monotonic() < self.action_until:
@@ -450,6 +465,50 @@ class App:
                 self.x, self.dir = hi, -1
         self.root.geometry(f"+{int(self.x + jitter)}+{int(self.y)}")
         self.root.after(30, self.physics)
+
+    def fly(self, ground, lo, hi):
+        """A thrown or dropped pet: gravity, bounces off the floor and the screen edges, and a
+        parachute when it falls from high up."""
+        S = self.S
+        top = self.work[1] - self.bub_h
+        if self.chute:
+            self.chute += 1
+            self.vy += (1.7 * S - self.vy) * 0.12       # drift down slowly
+            self.vx *= 0.96
+            self.x += self.vx + math.sin(self.chute / 10) * 0.8 * S
+        else:
+            self.vy += 0.9 * S
+            self.vx *= 0.995
+            self.x += self.vx
+            if self.vy > 3 * S and ground - self.y > 190 * S and not self.bounces:
+                self.chute = 1
+                self.bubble_until = 0       # the canopy needs the space above the head
+        self.y += self.vy
+        if self.y < top:
+            self.y, self.vy = top, abs(self.vy) * 0.4
+        if self.x < lo:
+            self.x, self.vx = lo, abs(self.vx) * 0.6
+        elif self.x > hi:
+            self.x, self.vx = hi, -abs(self.vx) * 0.6
+        if self.y < ground:
+            return
+        self.y = ground
+        self.land = 2
+        if not self.chute and self.vy > 5 * S and self.bounces < 5:
+            self.vy = -self.vy * 0.48
+            self.vx *= 0.75
+            self.bounces += 1
+            if self.bounces == 1 and self.vy < -9 * S:
+                self.spawn("spark", 2)
+            return
+        soft, hard = bool(self.chute), self.bounces >= 2
+        self.vy, self.airborne, self.chute = 0.0, False, 0
+        self.set_action("idle", 1.5)
+        if soft:
+            self.happy_until = time.monotonic() + 2
+            self.chirp("happy", None, 2)
+        elif hard and self.hatched():
+            self.chirp("dizzy", None, 2.5)
 
     def jump(self):
         self.vy = -8.5 * self.S
@@ -1351,22 +1410,30 @@ class App:
         self.check_updates(manual=False)
         self.root.after(int(6 * 3600 * 1000 + random.uniform(0, 1800) * 1000), self._update_loop)
 
-    def check_updates(self, manual=False):
-        self.updater.check(lambda info, err: self.on_update_info(info, err, manual))
-        if manual:
+    def check_updates(self, manual=False, quiet=False):
+        """manual: the user asked. quiet: Settings shows the result inline, so no card."""
+        self.update_state = ("checking", "Checking for updates…")
+        self.updater.check(lambda info, err: self.on_update_info(info, err, manual, quiet))
+        if manual and not quiet:
             self.board("Checking...", 3)
 
-    def on_update_info(self, info, err, manual):
+    def on_update_info(self, info, err, manual, quiet=False):
+        loud = manual and not quiet
         if err:
-            if manual:
+            self.update_state = ("error", "Couldn't reach GitHub. Check your internet and try again.")
+            if loud:
                 self.cards.show("Update check", f"Couldn't check for updates.\n{err}", [("OK", lambda: None)],
                                 kind="update", icon="task", timeout=30)
             return
+        self.cfg["last_update_check"] = time.time()
+        self.cfg.save()
         if not info:
-            if manual:
+            self.update_state = ("ok", "You're up to date")
+            if loud:
                 self.cards.show("Up to date", f"You have the latest Blip (v{__version__}).", [("OK", lambda: None)],
                                 kind="update", icon="check", timeout=20)
             return
+        self.update_state = ("new", f"Blip {info['version']} is available")
         if frozen() and (self.cfg["auto_update"] or manual):
             self.install_update(info)
         elif frozen():
@@ -1374,13 +1441,17 @@ class App:
                             [("Update now", lambda: self.install_update(info)), ("Later", lambda: None)],
                             kind="update", icon="task", key="update")
         else:
-            self.cards.show("Update", f"Blip v{info['version']} is out (you're running from source: git pull).",
-                            [("OK", lambda: None)], kind="update", icon="task", key="update", timeout=60)
+            self.update_state = ("new", f"Blip {info['version']} is out (running from source: git pull)")
+            if not quiet:
+                self.cards.show("Update", f"Blip v{info['version']} is out (you're running from source: git pull).",
+                                [("OK", lambda: None)], kind="update", icon="task", key="update", timeout=60)
 
     def install_update(self, info):
-        if self.alerts or self.calls_out or self.calls_in:
+        if self.alerts or self.calls_out or self.calls_in or self.voice:
+            self.update_state = ("new", f"Blip {info['version']} installs after your call")
             self.root.after(10 * 60 * 1000, lambda: self.install_update(info))
             return
+        self.update_state = ("installing", f"Installing Blip {info['version']}… Blip restarts by itself")
         self.board(f"Updating v{info['version']}", 30)
         self.updater.fetch(info, self.on_update_ready)
 
@@ -1453,6 +1524,8 @@ class App:
             for dx, dy in cells:
                 if 0 <= x + dx < GW:
                     g[(x + dx, y + dy)] = col
+        if self.chute and self.action == "fall":
+            self.add_chute(g)
         for (x, y), c in g.items():
             if y * P + oy >= 0:
                 cv.create_rectangle(self.ox + x * P, oy + y * P, self.ox + (x + 1) * P, oy + (y + 1) * P,
@@ -1464,6 +1537,31 @@ class App:
             self.draw_bubble()
         else:
             self.draw_sign()
+
+    def add_chute(self, g):
+        """A striped pixel parachute above the pet's head, swaying a little."""
+        t = self.top_row
+        sway = round(math.sin(self.chute / 10) * 1.5)
+        cx = GW // 2 + sway
+        top = t - 11
+        widths = [6, 10, 12, 13, 13]
+        red, cream, ink = "#ef5b6b", "#fff4e6", COL["out"]
+        for i, hw in enumerate(widths):
+            y = top + i
+            for x in range(cx - hw, cx + hw):
+                edge = x in (cx - hw, cx + hw - 1) or i == 0
+                stripe = ((x - cx + 13) // 4) % 2
+                g[(x, y)] = ink if edge else (red if stripe else cream)
+        y = top + len(widths)
+        for x in range(cx - 13, cx + 13):       # scalloped hem
+            if (x - cx) % 4 in (0, 1):
+                g[(x, y)] = ink
+        # lines from the hem down to the pet's shoulders
+        for sx, ex in ((cx - 12, GW // 2 - 6), (cx - 4, GW // 2 - 3), (cx + 3, GW // 2 + 2), (cx + 11, GW // 2 + 5)):
+            y0, y1 = y + 1, t + 2
+            for k in range(y1 - y0):
+                x = round(sx + (ex - sx) * k / max(1, y1 - y0 - 1))
+                g.setdefault((x, y0 + k), "#9a90b0")
 
     def draw_sign(self):
         disp = self.timers.display()
@@ -1548,6 +1646,7 @@ class App:
             self.open_window("timers")
             return
         self.drag = [e.x_root - self.x, e.y_root - self.y, e.x_root, e.y_root, False]
+        self.trail = []
 
     def on_drag(self, e):
         d = self.drag
@@ -1566,6 +1665,7 @@ class App:
                 self.ring_target = None
         if d[4]:
             self.x, self.y = e.x_root - d[0], e.y_root - d[1]
+            self.trail = (self.trail + [(time.monotonic(), e.x_root, e.y_root)])[-8:]
 
     def on_release(self, e):
         d, self.drag = self.drag, None
@@ -1576,15 +1676,28 @@ class App:
             lo, hi = self.bounds()
             self.x = min(max(self.x, lo), hi)
             if self.action == "held":
-                self.vy = 0.0
+                self.vx, self.vy = self.throw_speed()
                 self.airborne = True
-                self.set_action("fall", 5)
+                self.chute, self.bounces = 0, 0
+                self.set_action("fall", 1e18)
                 if self.alerts:
                     self.root.after(1500, lambda: self.alerts and self.set_action("ring", 1e18))
             self.cards.layout()
             self.save()
         else:
             self.pat()
+
+    def throw_speed(self):
+        """Mouse speed over the last ~0.1 s, in pixels per physics tick (30 ms)."""
+        now = time.monotonic()
+        pts = [t for t in self.trail if now - t[0] < 0.12]
+        if len(pts) < 2 or now - pts[-1][0] > 0.08:
+            return 0.0, 0.0
+        dt = max(0.016, pts[-1][0] - pts[0][0])
+        lim = 40 * self.S
+        vx = (pts[-1][1] - pts[0][1]) / dt * 0.03
+        vy = (pts[-1][2] - pts[0][2]) / dt * 0.03
+        return max(-lim, min(lim, vx)), max(-lim, min(lim, vy))
 
     def on_menu(self, e):
         if self.menu:
@@ -1610,39 +1723,40 @@ class App:
             ("moon", "Sleep", self.toggle_sleep, hatched, "Wake" if st["asleep"] else "Sleep"),
         ]
 
+        n_active = self.timers.active_count()
+
         def timer_menu():
             items = [{"label": f"{m} minutes" if m > 1 else "1 minute", "icon": "hourglass",
                       "command": (lambda sec=m * 60: self.start_timer(sec))} for m in (1, 5, 10, 15, 25, 30, 45, 60)]
-            return items + [{"sep": True}, {"label": "Other\u2026", "icon": "plus", "command": self.ask_timer}]
+            return items + [{"label": "Other…", "icon": "plus", "command": self.ask_timer},
+                            {"sep": True},
+                            {"label": "All timers & alarms", "icon": "gear", "hint": str(n_active or ""),
+                             "command": lambda: self.open_window("timers")}]
 
-        def people_menu(kind):
-            peers = self.net.online() if self.net else []
-            out = []
-            for p in peers:
-                busy = p.get("status") == "busy"
-                out.append({"label": p.get("name", "?"), "icon": "phone" if kind == "call" else "mail",
-                            "hint": "busy" if busy else "",
-                            "command": (lambda pid=p["id"]: self.call(pid)) if kind == "call"
-                            else (lambda pid=p["id"]: self.compose(pid))})
-            if not out:
-                out = [{"label": "Nobody nearby yet", "enabled": False},
-                       {"label": "Look again", "icon": "reset", "command": self.net_rescan}]
-            return out
-
-        nearby = len(self.net.online()) if self.net else 0
+        peers = sorted(self.net.online() if self.net else [], key=lambda p: (p.get("status") == "busy",
+                                                                             (p.get("name") or "").lower()))
         due = len(self.bc.items)
         items = [
             {"section": "Focus"},
-            {"label": "Timer", "icon": "hourglass", "submenu": timer_menu},
+            {"label": "Timer", "icon": "hourglass", "submenu": timer_menu,
+             "hint": f"{n_active} on" if n_active else ""},
             {"label": "Stopwatch", "icon": "stopwatch", "command": self.start_stopwatch},
-            {"label": "Alarm\u2026", "icon": "bell", "command": self.ask_alarm},
-            {"label": "Timers & alarms", "icon": "gear", "command": lambda: self.open_window("timers"),
-             "hint": str(self.timers.active_count() or "")},
-            {"section": "Office"},
-            {"label": "Call", "icon": "phone", "submenu": lambda: people_menu("call"),
-             "hint": str(nearby or "")},
-            {"label": "Message", "icon": "mail", "submenu": lambda: people_menu("msg")},
-            {"label": "Buddies & inbox", "icon": "people", "command": lambda: self.open_window("buddies")},
+            {"label": "Alarm…", "icon": "bell", "command": self.ask_alarm},
+            {"section": f"Office - {len(peers)} nearby" if peers else "Office"},
+        ]
+        SHOW = 5
+        for p in peers[:SHOW]:
+            pid = p["id"]
+            items.append({"person": p, "label": p.get("name", "?"),
+                          "command": (lambda pid=pid: self.compose(pid)),
+                          "buttons": [("phone", (lambda pid=pid: self.call(pid)), True, "Call"),
+                                      ("mail", (lambda pid=pid: self.compose(pid)), True, "Message")]})
+        if not peers:
+            items.append({"label": "Nobody nearby yet · look again", "icon": "reset", "command": self.net_rescan})
+        items += [
+            {"label": "Everyone & inbox" if len(peers) > SHOW else "Buddies & inbox", "icon": "people",
+             "command": lambda: self.open_window("buddies"),
+             "hint": f"+{len(peers) - SHOW}" if len(peers) > SHOW else ""},
             {"label": "Basecamp tasks", "icon": "task", "command": lambda: self.open_window("tasks"),
              "hint": str(due or "")} if self.bc.connected else
             {"label": "Connect Basecamp", "icon": "task", "command": self.connect_basecamp},
@@ -1683,6 +1797,20 @@ class App:
         if name == "tasks" and self.bc.connected:
             self.bc.refresh()
         return w
+
+    def apply_theme(self, name):
+        """Switch dark/light/system and redraw the open windows in the new colours."""
+        self.cfg["theme"] = name
+        self.cfg.save()
+        kit.set_theme(name)
+        W.style(self.root)
+        if self.menu:
+            self.menu.close()
+        for key, w in list(self.windows.items()):
+            if w and w.alive() and key != "welcome":
+                page = getattr(w, "page", None)
+                w.close()
+                self.open_window(key, page)
 
     def toggle_wander(self):
         self.st["wander"] = self.var_wander.get()

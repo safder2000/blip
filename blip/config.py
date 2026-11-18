@@ -55,6 +55,8 @@ DEFAULTS = {
     "sound": False,                # quiet by default; Settings > General > Sounds
     "volume": 60,
     "auto_update": True,
+    "theme": "dark",               # dark | light | system
+    "last_update_check": 0,
     "bc_token": "",
     "bc_refresh": "",
     "bc_expires": 0,

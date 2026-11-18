@@ -16,7 +16,7 @@ No admin rights needed. It installs to `%LOCALAPPDATA%\Programs\Blip` and starts
   click **More info → Run anyway**.
 - The first time Blip uses the network, Windows may ask to allow it. Click **Allow** (private networks).
 - Blip updates itself: it checks GitHub every few hours, downloads the new setup, verifies its SHA-256,
-  installs silently and restarts. (Settings → *Install updates automatically*.)
+  installs silently and restarts. Settings → General → Updates shows whether you are up to date; *Check now* checks on the spot.
 
 ### Mac (Apple Silicon)
 
@@ -34,13 +34,16 @@ and its menu back.
 
 ## Using it
 
-- **Left-click** pat · **drag** pick up · **right-click** for the menu (care buttons, timers, calls, settings).
+- **Left-click** pat · **drag** pick up · **right-click** for the menu (care buttons, timers, colleagues, settings).
+- **Throw it:** fling the pet and it flies, bounces off the screen edges and the taskbar, and gets dizzy after a
+  big bounce. Drop it from high up and it opens a parachute and floats down.
 - Click a poop to clean it. Click the timer sign to open *Timers & alarms*.
 - Pets don't talk like people: they chirp in their own language ("mew?", "arf!", "beep~") with a little
   icon for what they want. Real information ("Sent!", "DND on", "Timer 25:00") shows on a signboard,
   and calls, messages, alarms and Basecamp reminders pop up as cards.
 - Sounds are off by default. Settings → General → Sounds has a volume slider that plays a sample as you set it.
   Every sound is synthesised by the code itself, so no audio files ship with Blip.
+- Windows and the menu are **dark** by default; Settings → General → Theme switches to Light or Match system.
 - **Settings → Pet** to pick a look (Blip, Kitty, Bunny, Bear, Pup, Chick, Bot) and a colour.
   The first time Blip starts it asks your name and lets you pick your pet; colleagues see both.
 - Blip also lives in the **system tray** (the ^ next to the clock): click it for the menu,
@@ -53,9 +56,10 @@ Pets on the same network find each other automatically, with nothing to set up
 (UDP broadcast on port 47610, messages on TCP 47611). Pets also share the addresses of pets they know,
 so if one PC can reach another floor, everyone gets introduced.
 
-- Right-click → **Call ▸ name**: their pet runs to the middle of their screen and rings.
+- The right-click menu lists everyone nearby with their pet's face and a **call** and **message** button.
+  **Call**: their pet runs to the middle of their screen and rings.
   They answer with *Coming*, *2 min*, *Busy* or a custom reply, and your pet shows it.
-- Right-click → **Message ▸ name** for a short note. History is in **Buddies & inbox**.
+- **Message** sends a short note (clicking the name does the same). History is in **Buddies & inbox**.
 - **Voice calls:** when both PCs have a microphone, the ringing card has a **Talk** button. Audio goes straight
   between the two computers over the office network, encrypted with the group key. Use a headset to avoid echo.
 - **Do not disturb** silences calls (callers get an automatic "busy").
@@ -71,7 +75,7 @@ so if one PC can reach another floor, everyone gets introduced.
 ### Timers, stopwatch, alarms
 
 Right-click → **Timer ▸** 1–60 min or *Other…* (`25`, `1:30`, `90s`, `2h 15m`), **Stopwatch**, **Alarm…**.
-**Timers & alarms…** adds labels and repeating alarms (weekdays, every day, weekends), and pauses, resets or deletes them.
+**Timer ▸ All timers & alarms** (or clicking the sign above the pet) adds labels and repeating alarms (weekdays, every day, weekends), and pauses, resets or deletes them.
 The countdown shows on a pixel sign above the pet. When it rings, choose *Stop*, *+5 min* or *Snooze*.
 
 ### Basecamp

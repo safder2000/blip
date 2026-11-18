@@ -7,8 +7,6 @@ from . import kit
 from .sprites import ICON, PALETTES, build_egg, build_pet, draw_text, text_width
 from .ui import KEY, make_overlay, pixel_box
 
-SURFACE, INK, MUTED, ACCENT, HOVER, LINE = kit.SURFACE, kit.INK, kit.MUTED, kit.ACCENT, kit.HOVER, kit.LINE
-OFF = "#b9b3c8"
 
 
 class PopMenu:
@@ -59,15 +57,18 @@ class PopMenu:
             elif it.get("section"):
                 self.rows.append((yy, yy + round(24 * S), it))
                 yy += round(24 * S)
+            elif it.get("person"):
+                self.rows.append((yy, yy + round(34 * S), it))
+                yy += round(34 * S)
             else:
                 self.rows.append((yy, yy + rh, it))
                 yy += rh
         H = self.H = yy + round(6 * S) + p
 
         # ---- frame
-        pixel_box(cv, 2 * p, 2 * p, W + 2 * p, H + 2 * p, p, INK, "bg")
-        pixel_box(cv, 0, 0, W, H, p, INK, "bg")
-        pixel_box(cv, p, p, W - p, H - p, p, SURFACE, "bg")
+        pixel_box(cv, 2 * p, 2 * p, W + 2 * p, H + 2 * p, p, kit.SHADOW, "bg")
+        pixel_box(cv, 0, 0, W, H, p, kit.FRAME, "bg")
+        pixel_box(cv, p, p, W - p, H - p, p, kit.SURFACE, "bg")
         cv.config(height=H + 2 * p)
         self.draw_content()
 
@@ -118,68 +119,119 @@ class PopMenu:
                 X, Y = ax + (x - min(xs)) * sp, ay + (y - min(ys)) * sp
                 cv.create_rectangle(X, Y, X + sp, Y + sp, fill=c, width=0, tags=("fg", "head"))
             tx = x0 + round(60 * S)
-            cv.create_text(tx, y0 + round(14 * S), text=h["name"], font=kit.F["bold"], fill=INK, anchor="w",
+            cv.create_text(tx, y0 + round(14 * S), text=h["name"], font=kit.F["bold"], fill=kit.INK, anchor="w",
                            tags=("fg", "head"))
-            cv.create_text(tx, y0 + round(31 * S), text=h["status"], font=kit.F["tiny"], fill=MUTED, anchor="w",
+            cv.create_text(tx, y0 + round(31 * S), text=h["status"], font=kit.F["tiny"], fill=kit.MUTED, anchor="w",
                            tags=("fg", "head"))
             bx = tx
             gap = round(5 * S)
             bw = round((x1 - tx - round(10 * S) - 2 * gap) / 3)
             by = y0 + round(44 * S)
             for icon, val, col in h["bars"]:
-                cv.create_rectangle(bx, by, bx + bw, by + round(5 * S), fill="#dcd6ea", width=0, tags="fg")
+                cv.create_rectangle(bx, by, bx + bw, by + round(5 * S), fill=kit.TRACK, width=0, tags="fg")
                 cv.create_rectangle(bx, by, bx + bw * max(0, min(100, val)) / 100, by + round(5 * S),
                                     fill=col, width=0, tags="fg")
                 bx += bw + gap
         for ax0, ay0, ax1, ay1, (icon, lab, cmd, en, short) in self.act_rects:
             hov = self.hl == ("act", lab) and en
-            fill = kit.ACCENT_SOFT if hov else "#f7f5fb"
-            pixel_box(cv, ax0, ay0, ax1, ay1, p, kit.ACCENT if hov else LINE, "fg")
+            fill = kit.ACCENT_SOFT if hov else kit.TILE
+            pixel_box(cv, ax0, ay0, ax1, ay1, p, kit.ACCENT if hov else kit.LINE, "fg")
             pixel_box(cv, ax0 + 1, ay0 + 1, ax1 - 1, ay1 - 1, p, fill, "fg")
             ip = self.ip
             gw = text_width(ICON[icon], ip)
-            col = (ACCENT if hov else INK) if en else OFF
+            col = (kit.ACCENT if hov else kit.INK) if en else kit.OFF
             draw_text(cv, (ax0 + ax1 - gw) / 2, ay0 + round(7 * S), ICON[icon], ip, col, "fg")
             cv.create_text((ax0 + ax1) / 2, ay1 - round(10 * S), text=short, font=kit.F["tiny"],
-                           fill=(INK if en else OFF), tags="fg")
+                           fill=(kit.INK if en else kit.OFF), tags="fg")
         if self.actions:
             cv.create_rectangle(p + pad, self.sep_after_actions, W - p - pad, self.sep_after_actions + 1,
-                                fill=LINE, width=0, tags="fg")
+                                fill=kit.LINE, width=0, tags="fg")
         for y0, y1, it in self.rows:
             if it.get("sep"):
                 ym = (y0 + y1) // 2
-                cv.create_rectangle(p + pad, ym, W - p - pad, ym + 1, fill=LINE, width=0, tags="fg")
+                cv.create_rectangle(p + pad, ym, W - p - pad, ym + 1, fill=kit.LINE, width=0, tags="fg")
                 continue
             if it.get("section"):
                 draw_text(cv, p + pad + round(2 * S), y1 - round(9 * S) - 5 * self.ip // 2 - 2,
-                          it["section"].upper(), max(1, round(1 * S)), MUTED, "fg")
+                          it["section"].upper(), max(1, round(1 * S)), kit.MUTED, "fg")
+                continue
+            if it.get("person"):
+                self.draw_person(y0, y1, it)
                 continue
             en = it.get("enabled", True)
             hov = en and self.hl == ("row", id(it))
             if hov or (self.child and self.child.owner is it):
-                pixel_box(cv, p + round(4 * S), y0 + 1, W - p - round(4 * S), y1 - 1, p, HOVER, "fg")
-            fg = INK if en else OFF
+                pixel_box(cv, p + round(4 * S), y0 + 1, W - p - round(4 * S), y1 - 1, p, kit.HOVER, "fg")
+            fg = kit.INK if en else kit.OFF
             ix = p + pad + round(2 * S)
             if it.get("icon"):
                 draw_text(cv, ix, (y0 + y1 - 7 * self.ip) / 2, ICON[it["icon"]], self.ip,
-                          (ACCENT if hov else MUTED) if en else OFF, "fg")
+                          (kit.ACCENT if hov else kit.MUTED) if en else kit.OFF, "fg")
             cv.create_text(ix + round(24 * S), (y0 + y1) / 2, text=it["label"], font=kit.F["body"], fill=fg,
                            anchor="w", tags="fg")
             rx = W - p - pad - round(2 * S)
             if it.get("submenu"):
                 gw = text_width(ICON["chevron"], self.ip)
-                draw_text(cv, rx - gw, (y0 + y1 - 7 * self.ip) / 2, ICON["chevron"], self.ip, MUTED, "fg")
+                draw_text(cv, rx - gw, (y0 + y1 - 7 * self.ip) / 2, ICON["chevron"], self.ip, kit.MUTED, "fg")
             elif it.get("check") is not None:
                 tw, th = round(30 * S), round(16 * S)
                 on = it["check"]
                 tx0, ty0 = rx - tw, (y0 + y1 - th) / 2
-                pixel_box(cv, tx0, ty0, rx, ty0 + th, max(1, p // 2 + 1), ACCENT if on else "#d8d2e6", "fg")
+                pixel_box(cv, tx0, ty0, rx, ty0 + th, max(1, p // 2 + 1), kit.ACCENT if on else kit.TRACK, "fg")
                 k = th - round(6 * S)
                 kx = rx - k - round(3 * S) if on else tx0 + round(3 * S)
-                pixel_box(cv, kx, ty0 + round(3 * S), kx + k, ty0 + round(3 * S) + k, 1, "#ffffff", "fg")
+                pixel_box(cv, kx, ty0 + round(3 * S), kx + k, ty0 + round(3 * S) + k, 1, kit.KNOB, "fg")
             elif it.get("hint"):
-                cv.create_text(rx, (y0 + y1) / 2, text=it["hint"], font=kit.F["small"], fill=MUTED, anchor="e",
+                cv.create_text(rx, (y0 + y1) / 2, text=it["hint"], font=kit.F["small"], fill=kit.MUTED, anchor="e",
                                tags="fg")
+
+    def person_buttons(self, y0, y1, it):
+        """Rects of the round icon buttons at the right of a person row."""
+        S, p = self.S, self.p
+        bw = round(28 * S)
+        gap = round(4 * S)
+        rx = self.W - p - round(10 * S)
+        out = []
+        for i, b in enumerate(reversed(it["buttons"])):
+            x1 = rx - i * (bw + gap)
+            out.append((x1 - bw, y0 + round(4 * S), x1, y1 - round(4 * S), len(it["buttons"]) - 1 - i))
+        return out
+
+    def draw_person(self, y0, y1, it):
+        cv, S, p = self.cv, self.S, self.p
+        W = self.W
+        pad = round(10 * S)
+        row_hov = self.hl == ("row", id(it))
+        if row_hov or (self.hl and self.hl[:2] == ("btn", id(it))):
+            pixel_box(cv, p + round(4 * S), y0 + 1, W - p - round(4 * S), y1 - 1, p, kit.HOVER, "fg")
+        pr = it["person"]
+        g = build_pet(pr.get("stage") or "adult", pr.get("palette") if pr.get("palette") in PALETTES else "gold",
+                      "happy" if row_hov else "normal", 1, species=pr.get("species") or "blip")
+        xs = [x for x, _ in g]
+        ys = [y for _, y in g]
+        sp = max(1, round(0.9 * S))
+        top = min(ys)
+        ax = p + pad
+        h = (y1 - y0) - round(6 * S)
+        rows_fit = max(1, h // sp)
+        for (x, y), c in g.items():
+            if y - top < rows_fit:
+                X, Y = ax + (x - min(xs)) * sp, y0 + round(3 * S) + (y - top) * sp
+                cv.create_rectangle(X, Y, X + sp, Y + sp, fill=c, width=0, tags="fg")
+        tx = ax + round(34 * S)
+        busy = pr.get("status") == "busy"
+        cv.create_text(tx, (y0 + y1) / 2 - (round(6 * S) if busy else 0), text=it["label"], font=kit.F["body"],
+                       fill=kit.INK, anchor="w", tags="fg")
+        if busy:
+            cv.create_text(tx, (y0 + y1) / 2 + round(8 * S), text="busy", font=kit.F["tiny"], fill=kit.WARN,
+                           anchor="w", tags="fg")
+        for bx0, by0, bx1, by1, i in self.person_buttons(y0, y1, it):
+            icon, cmd, en, _tip = it["buttons"][i]
+            hov = self.hl == ("btn", id(it), i) and en
+            pixel_box(cv, bx0, by0, bx1, by1, p, kit.ACCENT if hov else kit.TILE, "fg")
+            gw = text_width(ICON[icon], self.ip)
+            col = kit.ON_ACCENT if hov else (kit.ACCENT if en else kit.OFF)
+            draw_text(cv, (bx0 + bx1 - gw) / 2, (by0 + by1 - 7 * self.ip) / 2, ICON[icon], self.ip, col, "fg")
 
     # ------------------------------------------------ interaction
     def hit(self, x, y):
@@ -192,6 +244,10 @@ class PopMenu:
                 return ("head", 0), None
         for y0, y1, it in self.rows:
             if y0 <= y < y1 and not it.get("sep") and not it.get("section"):
+                if it.get("person"):
+                    for bx0, by0, bx1, by1, i in self.person_buttons(y0, y1, it):
+                        if bx0 <= x <= bx1:
+                            return ("btn", id(it), i), it
                 return ("row", id(it)), it
         return None, None
 
@@ -200,7 +256,7 @@ class PopMenu:
         if key != self.hl:
             self.hl = key
             self.hover_since = time.monotonic()
-            self.cv.config(cursor="hand2" if key and key[0] in ("act", "head") else "")
+            self.cv.config(cursor="hand2" if key and key[0] in ("act", "head", "btn") else "")
             self.draw_content()
 
     def on_leave(self, e):
@@ -242,6 +298,10 @@ class PopMenu:
             cmd = self.header.get("command")
         elif key[0] == "act":
             icon, lab, cmd, en, _short = obj
+            if not en:
+                return
+        elif key[0] == "btn":
+            icon, cmd, en, _tip = obj["buttons"][key[2]]
             if not en:
                 return
         else:

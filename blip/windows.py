@@ -7,8 +7,7 @@ import webbrowser
 from tkinter import ttk
 
 from . import __version__, kit, plat
-from .kit import (ACCENT, ACCENT_SOFT, BG, DANGER, INK, LINE, MUTED, OK, SURFACE, WARN, Avatar, Btn, Card, Chips,
-                  Field, SettingRow, Scroller, Toggle, label, muted)
+from .kit import Avatar, Btn, Card, Chips, Field, SettingRow, Scroller, Toggle, label, muted
 from .net import DEFAULT_GROUP, local_ips
 from .sprites import COLORS, ICON, PALETTES, SPECIES, draw_text, text_width
 from .timers import EVERYDAY, WEEKDAYS, describe_days, fmt_clock, parse_clock, parse_duration
@@ -25,8 +24,19 @@ def style(root):
         s.theme_use("clam")
     except tk.TclError:
         pass
-    s.configure("TCombobox", fieldbackground=SURFACE, background=SURFACE, bordercolor=LINE, arrowcolor=INK,
-                lightcolor=SURFACE, darkcolor=SURFACE, padding=4)
+    s.configure("TCombobox", fieldbackground=kit.SURFACE, background=kit.SURFACE, bordercolor=kit.LINE, arrowcolor=kit.INK,
+                lightcolor=kit.SURFACE, darkcolor=kit.SURFACE, padding=4)
+
+
+def ago(ts):
+    d = max(0, time.time() - ts)
+    if d < 60:
+        return "just now"
+    if d < 3600:
+        return f"{int(d // 60)} min ago"
+    if d < 86400:
+        return f"{int(d // 3600)} h ago"
+    return f"{int(d // 86400)} d ago"
 
 
 def S_(w, v):
@@ -36,11 +46,11 @@ def S_(w, v):
 # ------------------------------------------------------------------ dialogs
 def ask_text(app, title, prompt, parent=None, initial="", placeholder="", ok="OK"):
     """A small modal prompt in Blip's style. Returns the text or None."""
-    top = tk.Toplevel(parent or app.root, bg=BG)
+    top = tk.Toplevel(parent or app.root, bg=kit.BG)
     top.title(title)
     top.resizable(False, False)
     top.transient(parent or app.root)
-    f = tk.Frame(top, bg=BG)
+    f = tk.Frame(top, bg=kit.BG)
     f.pack(padx=S_(top, 22), pady=S_(top, 18))
     label(f, prompt, "bold", wraplength=S_(top, 320)).pack(anchor="w")
     fld = Field(f, initial, width=36, placeholder=placeholder)
@@ -50,7 +60,7 @@ def ask_text(app, title, prompt, parent=None, initial="", placeholder="", ok="OK
     def done(v):
         res["v"] = v
         top.destroy()
-    bar = tk.Frame(f, bg=BG)
+    bar = tk.Frame(f, bg=kit.BG)
     bar.pack(fill="x")
     Btn(bar, ok, lambda: done(fld.get()), kind="primary").pack(side="right")
     Btn(bar, "Cancel", lambda: done(None)).pack(side="right", padx=S_(top, 8))
@@ -77,7 +87,7 @@ def section(parent, text, pady=(14, 6)):
     p = kit.px_of(parent, 1)
     cv = tk.Canvas(f, bg=kit.bg_of(parent), highlightthickness=0, height=7 * p + 1)
     cv.pack(fill="x")
-    draw_text(cv, 0, 0, text.upper(), p, MUTED)
+    draw_text(cv, 0, 0, text.upper(), p, kit.MUTED)
     return f
 
 
@@ -105,7 +115,7 @@ class NavItem(tk.Canvas):
     def __init__(self, parent, icon, text, command):
         S = kit.scale(parent)
         self.w, self.h = round(168 * S), round(36 * S)
-        super().__init__(parent, width=self.w, height=self.h, bg=BG, highlightthickness=0, bd=0, cursor="hand2")
+        super().__init__(parent, width=self.w, height=self.h, bg=kit.BG, highlightthickness=0, bd=0, cursor="hand2")
         self.icon, self.text, self.command = icon, text, command
         self.sel = self.hov = False
         self.bind("<Enter>", lambda e: self._set(hov=True))
@@ -123,13 +133,13 @@ class NavItem(tk.Canvas):
         S = kit.scale(self)
         p = kit.px_of(self, 2)
         if self.sel or self.hov:
-            pixel_box(self, 0, 0, self.w, self.h, p, ACCENT_SOFT if self.sel else "#ece9f4")
+            pixel_box(self, 0, 0, self.w, self.h, p, kit.ACCENT_SOFT if self.sel else kit.TRACK_SOFT)
         if self.sel:
-            self.create_rectangle(0, round(9 * S), round(3 * S), self.h - round(9 * S), fill=ACCENT, width=0)
+            self.create_rectangle(0, round(9 * S), round(3 * S), self.h - round(9 * S), fill=kit.ACCENT, width=0)
         ip = kit.px_of(self, 2)
-        draw_text(self, round(14 * S), (self.h - 7 * ip) / 2, ICON[self.icon], ip, ACCENT if self.sel else MUTED)
+        draw_text(self, round(14 * S), (self.h - 7 * ip) / 2, ICON[self.icon], ip, kit.ACCENT if self.sel else kit.MUTED)
         self.create_text(round(42 * S), self.h / 2, text=self.text, anchor="w",
-                         font=kit.F["bold"] if self.sel else kit.F["body"], fill=INK)
+                         font=kit.F["bold"] if self.sel else kit.F["body"], fill=kit.INK)
 
 
 class SettingsWindow(kit.Window):
@@ -140,16 +150,16 @@ class SettingsWindow(kit.Window):
 
     def build(self, f):
         S = self.S
-        side = tk.Frame(f, bg=BG)
+        side = tk.Frame(f, bg=kit.BG)
         side.pack(side="left", fill="y", padx=(0, round(16 * S)))
         self.nav = {}
         for key, icon, text in self.PAGES:
             n = NavItem(side, icon, text, lambda k=key: self.show(k))
             n.pack(pady=(0, round(2 * S)))
             self.nav[key] = n
-        tk.Frame(side, bg=BG).pack(fill="y", expand=True)
+        tk.Frame(side, bg=kit.BG).pack(fill="y", expand=True)
         muted(side, f"Blip v{__version__}").pack(anchor="w", padx=round(14 * S), pady=(round(20 * S), 0))
-        self.content = tk.Frame(f, bg=BG, width=round(480 * S), height=round(560 * S))
+        self.content = tk.Frame(f, bg=kit.BG, width=round(480 * S), height=round(560 * S))
         self.content.pack(side="left", fill="both", expand=True)
         self.content.pack_propagate(False)
         self.page = None
@@ -165,7 +175,7 @@ class SettingsWindow(kit.Window):
             n._set(sel=(k == key))
         for c in self.content.winfo_children():
             c.destroy()
-        sc = Scroller(self.content, height=round(560 * self.S), bg=BG)
+        sc = Scroller(self.content, height=round(560 * self.S), bg=kit.BG)
         sc.pack(fill="both", expand=True)
         getattr(self, "page_" + key)(sc.inner)
 
@@ -181,23 +191,23 @@ class SettingsWindow(kit.Window):
         card = Card(f)
         card.pack(fill="x")
         b = card.body
-        left = tk.Frame(b, bg=SURFACE)
+        left = tk.Frame(b, bg=kit.SURFACE)
         left.pack(side="left", padx=(0, round(14 * S)))
         pal = app.palette() if app.palette() in PALETTES else "gold"
         stage = st["stage"] if st["stage"] != "egg" or st["gone"] else "egg"
         if stage == "egg" and st["gone"]:
             stage = "baby"
-        self.big = Avatar(left, app.species(), pal, stage, "happy", px=kit.px_of(f, 4), animate=True, bg=SURFACE)
+        self.big = Avatar(left, app.species(), pal, stage, "happy", px=kit.px_of(f, 4), animate=True, bg=kit.SURFACE)
         self.big.pack()
-        right = tk.Frame(b, bg=SURFACE)
+        right = tk.Frame(b, bg=kit.SURFACE)
         right.pack(side="left", fill="both", expand=True)
         self.name_f = Field(right, st["name"], width=18, on_commit=self._rename)
         self.name_f.pack(anchor="w", fill="x")
         self.pet_status = muted(right, "")
         self.pet_status.pack(anchor="w", pady=(round(4 * S), round(6 * S)))
-        self.bars = tk.Canvas(right, bg=SURFACE, highlightthickness=0, height=round(5 * 15 * S), width=round(250 * S))
+        self.bars = tk.Canvas(right, bg=kit.SURFACE, highlightthickness=0, height=round(5 * 15 * S), width=round(250 * S))
         self.bars.pack(anchor="w")
-        acts = tk.Frame(right, bg=SURFACE)
+        acts = tk.Frame(right, bg=kit.SURFACE)
         acts.pack(anchor="w", pady=(round(8 * S), 0))
         for i, (tip, cmd) in enumerate((("Feed", lambda: app.feed("meal")), ("Snack", lambda: app.feed("snack")),
                                         ("Play", app.play), ("Clean", app.clean),
@@ -206,7 +216,7 @@ class SettingsWindow(kit.Window):
                 row=i // 3, column=i % 3, padx=(0, round(4 * S)), pady=(0, round(4 * S)))
 
         section(f, "Look")
-        grid = tk.Frame(f, bg=BG)
+        grid = tk.Frame(f, bg=kit.BG)
         grid.pack(fill="x")
         self.tiles = {}
         for i, (key, name) in enumerate(SPECIES.items()):
@@ -214,7 +224,7 @@ class SettingsWindow(kit.Window):
             t.grid(row=i // 4, column=i % 4, padx=(0, round(8 * S)), pady=(0, round(8 * S)), sticky="w")
             self.tiles[key] = t
         section(f, "Colour")
-        sw = tk.Frame(f, bg=BG)
+        sw = tk.Frame(f, bg=kit.BG)
         sw.pack(fill="x")
         self.swatches = {}
         for c in COLORS:
@@ -270,11 +280,11 @@ class SettingsWindow(kit.Window):
         ip = max(1, round(1 * S))
         for i, (icon, name, v) in enumerate(rows):
             y = i * round(15 * S)
-            draw_text(cv, 0, y + round(3 * S), ICON[icon], ip, MUTED)
-            cv.create_text(round(12 * S), y + round(7 * S), text=name, anchor="w", font=kit.F["tiny"], fill=MUTED)
+            draw_text(cv, 0, y + round(3 * S), ICON[icon], ip, kit.MUTED)
+            cv.create_text(round(12 * S), y + round(7 * S), text=name, anchor="w", font=kit.F["tiny"], fill=kit.MUTED)
             x0, x1 = round(60 * S), round(246 * S)
-            col = OK if v > 60 else WARN if v > 30 else DANGER
-            cv.create_rectangle(x0, y + round(4 * S), x1, y + round(10 * S), fill="#ece7f5", width=0)
+            col = kit.OK if v > 60 else kit.WARN if v > 30 else kit.DANGER
+            cv.create_rectangle(x0, y + round(4 * S), x1, y + round(10 * S), fill=kit.TRACK_SOFT, width=0)
             cv.create_rectangle(x0, y + round(4 * S), x0 + (x1 - x0) * v / 100, y + round(10 * S), fill=col, width=0)
 
     # ---------------------------------------------------------------- general page
@@ -286,6 +296,11 @@ class SettingsWindow(kit.Window):
         r = SettingRow(b, "Your name", "How you appear to colleagues' pets.")
         r.pack(fill="x")
         Field(r.right, cfg["display_name"], width=16, on_commit=self._set_name).pack()
+        kit.hline(b)
+        r = SettingRow(b, "Theme", "Colours for these windows and the menu.")
+        r.pack(fill="x")
+        Chips(b, [("dark", "Dark"), ("light", "Light"), ("system", "Match system")], cfg.get("theme", "dark"),
+              lambda v: self.after_idle_theme(v)).pack(anchor="w", pady=(round(8 * S), 0))
         kit.hline(b)
         r = SettingRow(b, "Sounds", "Chirps for calls, messages, timers and alarms.")
         r.pack(fill="x")
@@ -312,17 +327,61 @@ class SettingsWindow(kit.Window):
         self._toggle_row(b2, "Update automatically", "New versions install themselves quietly in the background.",
                          cfg["auto_update"], lambda v: self._cfg(auto_update=v))
         kit.hline(b2)
-        row = tk.Frame(b2, bg=SURFACE)
+        row = tk.Frame(b2, bg=kit.SURFACE)
         row.pack(fill="x")
-        label(row, f"You have Blip {__version__}").pack(side="left")
-        Btn(row, "Check now", lambda: app.check_updates(manual=True), kind="soft", small=True, icon="update").pack(
-            side="right")
-        row2 = tk.Frame(b2, bg=SURFACE)
+        left = tk.Frame(row, bg=kit.SURFACE)
+        left.pack(side="left", fill="x", expand=True)
+        label(left, f"Blip {__version__}").pack(anchor="w")
+        st = tk.Frame(left, bg=kit.SURFACE)
+        st.pack(anchor="w", pady=(round(2 * S), 0))
+        self.upd_dot = tk.Canvas(st, width=round(8 * S), height=round(8 * S), bg=kit.SURFACE, highlightthickness=0)
+        self.upd_dot.pack(side="left", padx=(0, round(6 * S)))
+        self.upd_label = label(st, "", "small", kit.MUTED)
+        self.upd_label.pack(side="left")
+        self.upd_btn = Btn(row, "Check now", self._check_now, kind="soft", small=True, icon="update")
+        self.upd_btn.pack(side="right")
+        self._upd_shown = None
+        self.refresh_general()
+        row2 = tk.Frame(b2, bg=kit.SURFACE)
         row2.pack(fill="x", pady=(round(10 * S), 0))
         Btn(row2, "Release notes", lambda: webbrowser.open("https://github.com/safder2000/blip/releases"),
             kind="ghost", small=True, icon="open").pack(side="left")
         Btn(row2, "Open data folder", lambda: plat.open_path(app.data), kind="ghost", small=True,
             icon="open").pack(side="left", padx=(round(6 * S), 0))
+
+    def after_idle_theme(self, name):
+        # let the chip finish its click before the window is rebuilt
+        self.top.after(60, lambda: self.app.apply_theme(name))
+
+    def _check_now(self):
+        self.app.check_updates(manual=True, quiet=True)
+        self.refresh_general()
+
+    def refresh_general(self):
+        lab = getattr(self, "upd_label", None)
+        if not lab or not lab.winfo_exists():
+            return
+        app = self.app
+        state = app.update_state
+        last = app.cfg.get("last_update_check") or 0
+        if state is None:
+            state = ("ok", "You're up to date") if last and time.time() - last < 2 * 86400 else                 ("idle", "Checks for updates every few hours")
+        kind, text = state
+        if kind == "ok" and last:
+            text += "  ·  checked " + ago(last)
+        shown = (kind, text)
+        if shown == self._upd_shown:
+            return
+        self._upd_shown = shown
+        col = {"ok": kit.OK, "new": kit.ACCENT, "installing": kit.ACCENT, "error": kit.DANGER,
+               "checking": kit.WARN}.get(kind, kit.MUTED)
+        lab.config(text=text, fg=kit.MUTED if kind in ("idle", "checking") else col)
+        d = self.upd_dot
+        d.delete("all")
+        n = round(8 * self.S)
+        pixel_box(d, 0, 0, n, n, 1, col)
+        busy = kind in ("checking", "installing")
+        self.upd_btn.set_enabled(not busy)
 
     def _toggle_row(self, parent, title, desc, value, command):
         r = SettingRow(parent, title, desc)
@@ -347,9 +406,9 @@ class SettingsWindow(kit.Window):
         card = Card(f)
         card.pack(fill="x")
         b = card.body
-        top = tk.Frame(b, bg=SURFACE)
+        top = tk.Frame(b, bg=kit.SURFACE)
         top.pack(fill="x")
-        self.net_dot = tk.Canvas(top, width=round(12 * S), height=round(12 * S), bg=SURFACE, highlightthickness=0)
+        self.net_dot = tk.Canvas(top, width=round(12 * S), height=round(12 * S), bg=kit.SURFACE, highlightthickness=0)
         self.net_dot.pack(side="left", padx=(0, round(8 * S)))
         self.net_label = label(top, "", "bold")
         self.net_label.pack(side="left")
@@ -370,7 +429,7 @@ class SettingsWindow(kit.Window):
         self.priv_toggle = self._toggle_row(
             b2, "Private group", "Only pets with the same group password can see each other. "
             "Off: everyone in the office who has Blip.", private, self._private)
-        self.priv_box = tk.Frame(b2, bg=SURFACE)
+        self.priv_box = tk.Frame(b2, bg=kit.SURFACE)
         self.priv_field = Field(self.priv_box, cfg["passphrase"] if private else "", width=26, show="•",
                                 placeholder="Group password", on_commit=self._set_group)
         self.priv_field.pack(side="left", pady=(round(10 * S), 0))
@@ -426,7 +485,7 @@ class SettingsWindow(kit.Window):
         app = self.app
         txt = app.net_status()
         n = len(app.net.online()) if app.net else 0
-        col = OK if (app.net and n) else WARN if app.net else DANGER
+        col = kit.OK if (app.net and n) else kit.WARN if app.net else kit.DANGER
         self.net_label.config(text=txt)
         self.net_dot.delete("all")
         S = self.S
@@ -442,7 +501,7 @@ class SettingsWindow(kit.Window):
         self.bc_title.pack(anchor="w")
         self.bc_sub = muted(b, "", wraplength=round(420 * S))
         self.bc_sub.pack(anchor="w", pady=(round(4 * S), round(12 * S)))
-        self.bc_btns = tk.Frame(b, bg=SURFACE)
+        self.bc_btns = tk.Frame(b, bg=kit.SURFACE)
         self.bc_btns.pack(anchor="w")
         self.bc_state = None
 
@@ -543,7 +602,7 @@ class SpeciesTile(tk.Canvas):
     def __init__(self, parent, key, name, palette, command):
         S = kit.scale(parent)
         self.w, self.h = round(104 * S), round(96 * S)
-        super().__init__(parent, width=self.w, height=self.h, bg=BG, highlightthickness=0, bd=0, cursor="hand2")
+        super().__init__(parent, width=self.w, height=self.h, bg=kit.BG, highlightthickness=0, bd=0, cursor="hand2")
         self.key, self.name, self.palette = key, name, palette
         self.sel = self.hov = False
         self.bind("<Enter>", lambda e: self.set(hov=True))
@@ -561,10 +620,10 @@ class SpeciesTile(tk.Canvas):
         self.delete("all")
         S = kit.scale(self)
         p = kit.px_of(self, 2)
-        border = ACCENT if self.sel else ("#cfc6e2" if self.hov else LINE)
-        kit.framed_box(self, 0, 0, self.w, self.h, p, border, ACCENT_SOFT if self.sel else SURFACE)
+        border = kit.ACCENT if self.sel else (kit.BORDER_HOV if self.hov else kit.LINE)
+        kit.framed_box(self, 0, 0, self.w, self.h, p, border, kit.ACCENT_SOFT if self.sel else kit.SURFACE)
         if self.sel:
-            kit.framed_box(self, 1, 1, self.w - 1, self.h - 1, p, border, ACCENT_SOFT)
+            kit.framed_box(self, 1, 1, self.w - 1, self.h - 1, p, border, kit.ACCENT_SOFT)
         g = build_pet("adult", self.palette, "happy" if (self.sel or self.hov) else "normal", 1, species=self.key)
         xs = [x for x, _ in g]
         ys = [y for _, y in g]
@@ -575,14 +634,14 @@ class SpeciesTile(tk.Canvas):
             X, Y = ox + (x - min(xs)) * sp, oy + (y - min(ys)) * sp
             self.create_rectangle(X, Y, X + sp, Y + sp, fill=c, width=0)
         self.create_text(self.w / 2, self.h - round(13 * S), text=self.name,
-                         font=kit.F["bold"] if self.sel else kit.F["small"], fill=INK)
+                         font=kit.F["bold"] if self.sel else kit.F["small"], fill=kit.INK)
 
 
 class Swatch(tk.Canvas):
     def __init__(self, parent, color, command):
         S = kit.scale(parent)
         self.s = round(30 * S)
-        super().__init__(parent, width=self.s, height=self.s, bg=BG, highlightthickness=0, bd=0, cursor="hand2")
+        super().__init__(parent, width=self.s, height=self.s, bg=kit.BG, highlightthickness=0, bd=0, cursor="hand2")
         self.color = color
         self.sel = False
         self.bind("<ButtonRelease-1>", lambda e: command())
@@ -596,7 +655,7 @@ class Swatch(tk.Canvas):
         self.delete("all")
         p = kit.px_of(self, 2)
         s = self.s
-        kit.framed_box(self, 0, 0, s, s, p, ACCENT if self.sel else LINE, SURFACE)
+        kit.framed_box(self, 0, 0, s, s, p, kit.ACCENT if self.sel else kit.LINE, kit.SURFACE)
         m = p * 2 + (1 if self.sel else 0)
         if self.color == "auto":
             cols = ["#9be8c8", "#8fd3f0", "#ffd166", "#c3a6e8"]
@@ -621,12 +680,12 @@ class TimersWindow(kit.Window):
         c.pack(fill="x")
         b = c.body
         label(b, "Timer", "bold").pack(anchor="w")
-        row = tk.Frame(b, bg=SURFACE)
+        row = tk.Frame(b, bg=kit.SURFACE)
         row.pack(fill="x", pady=(round(8 * S), 0))
         for m in (1, 5, 10, 15, 25, 30, 45, 60):
             Btn(row, f"{m}m", lambda m=m: app.start_timer(m * 60, self.tlabel.get().strip()), kind="soft",
                 small=True).pack(side="left", padx=(0, round(4 * S)))
-        row2 = tk.Frame(b, bg=SURFACE)
+        row2 = tk.Frame(b, bg=kit.SURFACE)
         row2.pack(fill="x", pady=(round(10 * S), 0))
         self.tdur = Field(row2, "", width=9, placeholder="25 / 1:30")
         self.tdur.pack(side="left")
@@ -641,7 +700,7 @@ class TimersWindow(kit.Window):
         c2.pack(fill="x", pady=(round(10 * S), 0))
         b2 = c2.body
         label(b2, "Alarm", "bold").pack(anchor="w")
-        row3 = tk.Frame(b2, bg=SURFACE)
+        row3 = tk.Frame(b2, bg=kit.SURFACE)
         row3.pack(fill="x", pady=(round(8 * S), 0))
         self.at = Field(row3, time.strftime("%H:%M", time.localtime(time.time() + 3600)), width=7)
         self.at.pack(side="left")
@@ -650,11 +709,11 @@ class TimersWindow(kit.Window):
         Btn(row3, "Add alarm", self.add_alarm, kind="primary", small=True, icon="bell").pack(side="left")
         self.rep = Chips(b2, REPEAT, "once")
         self.rep.pack(anchor="w", pady=(round(8 * S), 0))
-        self.err = tk.Label(f, text="", font=kit.F["small"], fg=DANGER, bg=BG)
+        self.err = tk.Label(f, text="", font=kit.F["small"], fg=kit.DANGER, bg=kit.BG)
         self.err.pack(anchor="w")
 
         section(f, "Running", (6, 6))
-        self.list = Scroller(f, height=round(230 * S), bg=BG)
+        self.list = Scroller(f, height=round(230 * S), bg=kit.BG)
         self.list.pack(fill="both", expand=True)
         self.sig = None
         self.rows = {}
@@ -707,18 +766,18 @@ class TimersWindow(kit.Window):
         card = Card(self.list.inner, pad=10)
         card.pack(fill="x", pady=(0, round(6 * S)))
         b = card.body
-        cv = tk.Canvas(b, bg=SURFACE, highlightthickness=0, width=round(150 * S), height=round(22 * S))
+        cv = tk.Canvas(b, bg=kit.SURFACE, highlightthickness=0, width=round(150 * S), height=round(22 * S))
         cv.pack(side="left")
-        mid = tk.Frame(b, bg=SURFACE)
+        mid = tk.Frame(b, bg=kit.SURFACE)
         mid.pack(side="left", fill="x", expand=True, padx=(round(8 * S), 0))
         name = it.get("label") or {"timer": "Timer", "stopwatch": "Stopwatch", "alarm": "Alarm"}[it["kind"]]
         label(mid, name, "bold").pack(anchor="w")
         sub = muted(mid, "")
         sub.pack(anchor="w")
-        bar = tk.Canvas(mid, bg=SURFACE, highlightthickness=0, height=round(4 * S), width=round(120 * S))
+        bar = tk.Canvas(mid, bg=kit.SURFACE, highlightthickness=0, height=round(4 * S), width=round(120 * S))
         if it["kind"] == "timer":
             bar.pack(anchor="w", pady=(round(3 * S), 0))
-        btns = tk.Frame(b, bg=SURFACE)
+        btns = tk.Frame(b, bg=kit.SURFACE)
         btns.pack(side="right")
         paused = (it["kind"] == "timer" and it["left"] is not None) or \
                  (it["kind"] == "stopwatch" and not it["running"]) or (it["kind"] == "alarm" and not it["enabled"])
@@ -741,8 +800,8 @@ class TimersWindow(kit.Window):
             bar = r["bar"]
             bar.delete("all")
             w = round(120 * S)
-            bar.create_rectangle(0, 0, w, round(4 * S), fill="#ece7f5", width=0)
-            bar.create_rectangle(0, 0, w * frac, round(4 * S), fill=ACCENT, width=0)
+            bar.create_rectangle(0, 0, w, round(4 * S), fill=kit.TRACK_SOFT, width=0)
+            bar.create_rectangle(0, 0, w * frac, round(4 * S), fill=kit.ACCENT, width=0)
         elif k == "stopwatch":
             t, icon = fmt_clock(tm.elapsed(it, now), False), "stopwatch"
             sub = "running" if it["running"] else "paused"
@@ -751,8 +810,8 @@ class TimersWindow(kit.Window):
             sub = describe_days(it["days"]) if it["enabled"] else "off"
             if it.get("snooze"):
                 sub += f"  ·  snoozed {fmt_clock(it['snooze'] - now)}"
-        x = draw_text(cv, 0, round(4 * S), ICON[icon], p, ACCENT) + 4 * p
-        draw_text(cv, x, round(4 * S), t, p, INK)
+        x = draw_text(cv, 0, round(4 * S), ICON[icon], p, kit.ACCENT) + 4 * p
+        draw_text(cv, x, round(4 * S), t, p, kit.INK)
         r["sub"].config(text=sub)
 
 
@@ -779,11 +838,11 @@ class BuddiesWindow(kit.Window):
         section(f, "Nearby")
         self.net_lbl = muted(f, "")
         self.net_lbl.pack(anchor="w", pady=(0, round(6 * S)))
-        self.people = Scroller(f, height=round(150 * S), bg=BG)
+        self.people = Scroller(f, height=round(150 * S), bg=kit.BG)
         self.people.pack(fill="x")
 
         section(f, "Inbox")
-        self.inbox = Scroller(f, height=round(180 * S), bg=BG)
+        self.inbox = Scroller(f, height=round(180 * S), bg=kit.BG)
         self.inbox.pack(fill="x")
         Btn(f, "Clear inbox", self.clear_inbox, kind="ghost", small=True, icon="trash").pack(
             anchor="e", pady=(round(6 * S), 0))
@@ -836,20 +895,20 @@ class BuddiesWindow(kit.Window):
         b = card.body
         pal = p.get("palette") if p.get("palette") in PALETTES else "gold"
         stage = p.get("stage") if p.get("stage") in ("baby", "child", "adult", "egg") else "adult"
-        Avatar(b, p.get("species") or "blip", pal, stage, "normal", px=max(1, round(1.5 * S)), bg=SURFACE).pack(
+        Avatar(b, p.get("species") or "blip", pal, stage, "normal", px=max(1, round(1.5 * S)), bg=kit.SURFACE).pack(
             side="left")
-        mid = tk.Frame(b, bg=SURFACE)
+        mid = tk.Frame(b, bg=kit.SURFACE)
         mid.pack(side="left", fill="x", expand=True, padx=(round(10 * S), 0))
         label(mid, p.get("name", "?"), "bold").pack(anchor="w")
         busy = p.get("status") == "busy"
-        st = tk.Frame(mid, bg=SURFACE)
+        st = tk.Frame(mid, bg=kit.SURFACE)
         st.pack(anchor="w")
-        dot = tk.Canvas(st, width=round(8 * S), height=round(8 * S), bg=SURFACE, highlightthickness=0)
-        pixel_box(dot, 0, 0, round(8 * S), round(8 * S), 1, WARN if busy else OK)
+        dot = tk.Canvas(st, width=round(8 * S), height=round(8 * S), bg=kit.SURFACE, highlightthickness=0)
+        pixel_box(dot, 0, 0, round(8 * S), round(8 * S), 1, kit.WARN if busy else kit.OK)
         dot.pack(side="left", padx=(0, round(5 * S)))
         muted(st, ("Do not disturb" if busy else "Available") + (f"  ·  {p['ip']}" if p.get("ip") else "")).pack(
             side="left")
-        btns = tk.Frame(b, bg=SURFACE)
+        btns = tk.Frame(b, bg=kit.SURFACE)
         btns.pack(side="right")
         Btn(btns, "Call", lambda: app.call(p["id"]), kind="primary", small=True, icon="phone").pack(side="left")
         Btn(btns, "Message", lambda: app.compose(p["id"], parent=self.top), small=True, icon="mail").pack(
@@ -857,19 +916,19 @@ class BuddiesWindow(kit.Window):
 
     def _msg(self, e):
         app, S = self.app, self.S
-        row = tk.Frame(self.inbox.inner, bg=BG)
+        row = tk.Frame(self.inbox.inner, bg=kit.BG)
         row.pack(fill="x", pady=(0, round(4 * S)))
         mine = e["dir"] == "out"
-        bubble = tk.Frame(row, bg=ACCENT_SOFT if mine else SURFACE, padx=round(10 * S), pady=round(6 * S),
-                          highlightthickness=1, highlightbackground=ACCENT_SOFT if mine else LINE)
+        bubble = tk.Frame(row, bg=kit.ACCENT_SOFT if mine else kit.SURFACE, padx=round(10 * S), pady=round(6 * S),
+                          highlightthickness=1, highlightbackground=kit.ACCENT_SOFT if mine else kit.LINE)
         bubble.pack(side="right" if mine else "left", anchor="e" if mine else "w")
         who = "You → " + e.get("name", "?") if mine else e.get("name", "?")
         top = tk.Frame(bubble, bg=bubble["bg"])
         top.pack(fill="x")
-        tk.Label(top, text=who, font=kit.F["tiny"], fg=MUTED, bg=bubble["bg"]).pack(side="left")
-        tk.Label(top, text=time.strftime("  %H:%M", time.localtime(e["ts"])), font=kit.F["tiny"], fg=MUTED,
+        tk.Label(top, text=who, font=kit.F["tiny"], fg=kit.MUTED, bg=bubble["bg"]).pack(side="left")
+        tk.Label(top, text=time.strftime("  %H:%M", time.localtime(e["ts"])), font=kit.F["tiny"], fg=kit.MUTED,
                  bg=bubble["bg"]).pack(side="left")
-        tk.Label(bubble, text=e["text"], font=kit.F["body"], fg=INK, bg=bubble["bg"], wraplength=round(330 * S),
+        tk.Label(bubble, text=e["text"], font=kit.F["body"], fg=kit.INK, bg=bubble["bg"], wraplength=round(330 * S),
                  justify="left", anchor="w").pack(anchor="w")
         if not mine and e.get("peer"):
             Btn(row, "Reply", lambda: app.compose(e["peer"], parent=self.top, name=e.get("name")), kind="ghost",
@@ -884,12 +943,12 @@ class TasksWindow(kit.Window):
 
     def build(self, f):
         S = self.S
-        bar = tk.Frame(f, bg=BG)
+        bar = tk.Frame(f, bg=kit.BG)
         bar.pack(fill="x")
         self.info = muted(bar, "")
         self.info.pack(side="left")
         Btn(bar, "Refresh", lambda: self.app.bc.refresh(), kind="ghost", small=True, icon="reset").pack(side="right")
-        self.list = Scroller(f, height=round(380 * S), bg=BG)
+        self.list = Scroller(f, height=round(380 * S), bg=kit.BG)
         self.list.pack(fill="both", expand=True, pady=(round(8 * S), 0))
         self.list.cv.config(width=round(500 * S))
         self.sig = None
@@ -933,21 +992,21 @@ class TasksWindow(kit.Window):
         card.pack(fill="x", pady=(0, round(6 * S)))
         b = card.body
         over = it["scope"] == "overdue"
-        badge = tk.Canvas(b, bg=SURFACE, highlightthickness=0, width=round(64 * S), height=round(20 * S))
+        badge = tk.Canvas(b, bg=kit.SURFACE, highlightthickness=0, width=round(64 * S), height=round(20 * S))
         p = max(1, round(1 * S))
         txt = "OVERDUE" if over else "TODAY"
-        col, fill = (DANGER, "#fdecee") if over else ("#b7791f", "#fdf3df")
+        col, fill = (kit.DANGER, kit.DANGER_SOFT) if over else (kit.WARN_INK, kit.WARN_SOFT)
         pixel_box(badge, 0, 0, round(64 * S), round(20 * S), kit.px_of(b, 2), fill)
         draw_text(badge, (round(64 * S) - text_width(txt, p)) / 2, (round(20 * S) - 7 * p) / 2, txt, p, col)
         badge.pack(side="left", anchor="n", pady=(round(2 * S), 0))
-        mid = tk.Frame(b, bg=SURFACE)
+        mid = tk.Frame(b, bg=kit.SURFACE)
         mid.pack(side="left", fill="x", expand=True, padx=(round(10 * S), round(6 * S)))
         label(mid, it["content"], "body", wraplength=round(280 * S)).pack(anchor="w")
         extra = it.get("project") or ""
         if it.get("due_on"):
             extra += ("  ·  " if extra else "") + f"due {it['due_on']}"
         muted(mid, extra).pack(anchor="w")
-        btns = tk.Frame(b, bg=SURFACE)
+        btns = tk.Frame(b, bg=kit.SURFACE)
         btns.pack(side="right", anchor="n")
         if it.get("type") in ("todo", "Todo", None):
             Btn(btns, "Done", lambda: (app.complete_task(it), setattr(self, "sig", None)), kind="soft", small=True,
@@ -980,21 +1039,21 @@ class WelcomeWindow(kit.Window):
 
         section(f, "Pick your pet")
         self.pal = app.palette() if app.palette() in PALETTES else "gold"
-        grid = tk.Frame(f, bg=BG)
+        grid = tk.Frame(f, bg=kit.BG)
         grid.pack(fill="x")
         self.tiles = {}
         for i, (key, nm) in enumerate(SPECIES.items()):
             t = SpeciesTile(grid, key, nm, self.pal, lambda k=key: self.pick(species=k))
             t.grid(row=i // 4, column=i % 4, padx=(0, round(8 * S)), pady=(0, round(8 * S)), sticky="w")
             self.tiles[key] = t
-        sw = tk.Frame(f, bg=BG)
+        sw = tk.Frame(f, bg=kit.BG)
         sw.pack(fill="x", pady=(round(4 * S), 0))
         self.swatches = {}
         for c in COLORS:
             s = Swatch(sw, c, lambda c=c: self.pick(color=c))
             s.pack(side="left", padx=(0, round(6 * S)))
             self.swatches[c] = s
-        row = tk.Frame(f, bg=BG)
+        row = tk.Frame(f, bg=kit.BG)
         row.pack(fill="x", pady=(round(14 * S), 0))
         label(row, "Pet's name").pack(side="left")
         self.pet = Field(row, st["name"], width=14)
