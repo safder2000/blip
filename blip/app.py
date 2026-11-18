@@ -262,6 +262,9 @@ class App:
         self.root.after(100, self.pump)
 
     def _on_error(self, *exc):
+        tb = "".join(traceback.format_exception(*exc))
+        if exc[0] is AttributeError and "deletecommand" in tb:
+            return      # Tk cleaning up an after() callback of a window that already closed: harmless
         try:
             with open(self.data / "error.log", "a", encoding="utf-8") as fh:
                 fh.write(time.ctime() + f" v{__version__}\n" + "".join(traceback.format_exception(*exc)) + "\n")
