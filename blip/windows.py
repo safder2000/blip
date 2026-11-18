@@ -297,10 +297,15 @@ class SettingsWindow(kit.Window):
         r.pack(fill="x")
         Field(r.right, cfg["display_name"], width=16, on_commit=self._set_name).pack()
         kit.hline(b)
-        r = SettingRow(b, "Theme", "Colours for these windows and the menu.")
+        r = SettingRow(b, "Appearance", "Colours for these windows and the menu.")
         r.pack(fill="x")
-        Chips(b, [("dark", "Dark"), ("light", "Light"), ("system", "Match system")], cfg.get("theme", "dark"),
-              lambda v: self.after_idle_theme(v)).pack(anchor="w", pady=(round(8 * S), 0))
+        tiles = tk.Frame(b, bg=kit.SURFACE)
+        tiles.pack(anchor="w", pady=(round(10 * S), 0))
+        cur = cfg.get("theme", "system")
+        for key, name in (("system", "Match system"), ("light", "Light"), ("dark", "Dark")):
+            t = ThemeTile(tiles, key, name, lambda k=key: self.after_idle_theme(k))
+            t.set(sel=(key == cur))
+            t.pack(side="left", padx=(0, round(10 * S)))
         kit.hline(b)
         r = SettingRow(b, "Sounds", "Chirps for calls, messages, timers and alarms.")
         r.pack(fill="x")
@@ -635,6 +640,79 @@ class SpeciesTile(tk.Canvas):
             self.create_rectangle(X, Y, X + sp, Y + sp, fill=c, width=0)
         self.create_text(self.w / 2, self.h - round(13 * S), text=self.name,
                          font=kit.F["bold"] if self.sel else kit.F["small"], fill=kit.INK)
+
+
+class ThemeTile(tk.Canvas):
+    """A little picture of a Blip window in that theme; 'system' is half light, half dark."""
+
+    def __init__(self, parent, key, name, command):
+        S = kit.scale(parent)
+        self.w, self.h = round(126 * S), round(104 * S)
+        super().__init__(parent, width=self.w, height=self.h, bg=kit.bg_of(parent), highlightthickness=0, bd=0,
+                         cursor="hand2")
+        self.key, self.name = key, name
+        self.sel = self.hov = False
+        self.bind("<Enter>", lambda e=None: self.set(hov=True))
+        self.bind("<Leave>", lambda e=None: self.set(hov=False))
+        self.bind("<ButtonRelease-1>", lambda e=None: command())
+        self.draw()
+
+    def set(self, **kw):
+        for k, v in kw.items():
+            setattr(self, k, v)
+        self.draw()
+
+    def _preview(self, x0, y0, x1, y1, T, clip):
+        """Draw a mini window with theme T, only inside clip=(cx0, cx1)."""
+        cx0, cx1 = clip
+
+        def rect(a, b, c, d, fill):
+            a, c = max(a, cx0), min(c, cx1)
+            if c > a:
+                self.create_rectangle(a, b, c, d, fill=fill, width=0)
+        S = kit.scale(self)
+        u = lambda v: round(v * S)
+        rect(x0, y0, x1, y1, T["LINE"])
+        rect(x0 + 1, y0 + 1, x1 - 1, y1 - 1, T["BG"])
+        # sidebar
+        for i, (w, col) in enumerate(((22, T["ACCENT"]), (18, T["MUTED"]), (20, T["MUTED"]))):
+            yy = y0 + u(10) + i * u(9)
+            rect(x0 + u(7), yy, x0 + u(7 + w), yy + u(3), col)
+        # card
+        cx, cy = x0 + u(38), y0 + u(7)
+        rect(cx, cy, x1 - u(6), y1 - u(6), T["LINE"])
+        rect(cx + 1, cy + 1, x1 - u(6) - 1, y1 - u(6) - 1, T["SURFACE"])
+        rect(cx + u(6), cy + u(7), cx + u(40), cy + u(10), T["INK"])
+        rect(cx + u(6), cy + u(14), cx + u(30), cy + u(16), T["MUTED"])
+        rect(cx + u(6), cy + u(25), cx + u(36), cy + u(28), T["INK"])
+        rect(cx + u(6), cy + u(32), cx + u(26), cy + u(34), T["MUTED"])
+        tx = x1 - u(6) - u(22)
+        rect(tx, cy + u(7), tx + u(14), cy + u(14), T["ACCENT"])
+        rect(tx + u(8), cy + u(8), tx + u(13), cy + u(13), T["KNOB"])
+        rect(tx, cy + u(25), tx + u(14), cy + u(32), T["TRACK"])
+        rect(tx + u(1), cy + u(26), tx + u(6), cy + u(31), T["KNOB"])
+
+    def draw(self):
+        self.delete("all")
+        S = kit.scale(self)
+        p = kit.px_of(self, 2)
+        bg = kit.bg_of(self)
+        border = kit.ACCENT if self.sel else (kit.BORDER_HOV if self.hov else kit.LINE)
+        ph = round(72 * S)
+        kit.framed_box(self, 0, 0, self.w, ph, p, border, bg)
+        if self.sel:
+            kit.framed_box(self, 1, 1, self.w - 1, ph - 1, p, border, bg)
+        m = round(5 * S)
+        x0, y0, x1, y1 = m, m, self.w - m, ph - m
+        if self.key == "system":
+            mid = (x0 + x1) // 2
+            self._preview(x0, y0, x1, y1, kit.THEMES["light"], (x0, mid))
+            self._preview(x0, y0, x1, y1, kit.THEMES["dark"], (mid, x1))
+        else:
+            self._preview(x0, y0, x1, y1, kit.THEMES[self.key], (x0, x1))
+        ty = ph + round(16 * S)
+        self.create_text(self.w / 2, ty, text=self.name, font=kit.F["bold"] if self.sel else kit.F["small"],
+                         fill=kit.INK if self.sel else kit.MUTED)
 
 
 class Swatch(tk.Canvas):

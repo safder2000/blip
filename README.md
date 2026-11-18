@@ -43,7 +43,7 @@ and its menu back.
   and calls, messages, alarms and Basecamp reminders pop up as cards.
 - Sounds are off by default. Settings → General → Sounds has a volume slider that plays a sample as you set it.
   Every sound is synthesised by the code itself, so no audio files ship with Blip.
-- Windows and the menu are **dark** by default; Settings → General → Theme switches to Light or Match system.
+- Windows and the menu follow your system's light or dark mode, switching live when it changes. Settings → General → Appearance picks Match system, Light or Dark.
 - **Settings → Pet** to pick a look (Blip, Kitty, Bunny, Bear, Pup, Chick, Bot) and a colour.
   The first time Blip starts it asks your name and lets you pick your pet; colleagues see both.
 - Blip also lives in the **system tray** (the ^ next to the clock): click it for the menu,

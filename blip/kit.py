@@ -411,8 +411,8 @@ class Card(tk.Frame):
         self.body.pack(fill="both", expand=True)
 
 
-def label(parent, text, kind="body", fg=INK, **kw):
-    opts = {"font": F.get(kind, F["body"]), "fg": fg, "bg": bg_of(parent), "anchor": "w", "justify": "left"}
+def label(parent, text, kind="body", fg=None, **kw):
+    opts = {"font": F.get(kind, F["body"]), "fg": fg or INK, "bg": bg_of(parent), "anchor": "w", "justify": "left"}
     opts.update(kw)
     return tk.Label(parent, text=text, **opts)
 

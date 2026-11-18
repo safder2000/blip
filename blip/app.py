@@ -229,6 +229,7 @@ class App:
         self.physics()
         self.anim()
         root.after(1000, self.sim)
+        root.after(4000, self.follow_system_theme)
         root.after(100, self.pump)
         self.tray = None
         self.temp_shown = False
@@ -554,6 +555,14 @@ class App:
         self.particles = [p for p in self.particles if p[3] > 0]
         self.draw()
         self.root.after(250, self.anim)
+
+    def follow_system_theme(self):
+        """With 'Match system', switch when Windows / macOS flips between light and dark."""
+        if self.cfg.get("theme") == "system":
+            want = "dark" if plat.system_dark() else "light"
+            if want != kit.THEME:
+                self.apply_theme("system", chosen=False)
+        self.root.after(10000 if plat.MAC else 4000, self.follow_system_theme)
 
     def sim(self):
         now = time.time()
@@ -1798,9 +1807,11 @@ class App:
             self.bc.refresh()
         return w
 
-    def apply_theme(self, name):
+    def apply_theme(self, name, chosen=True):
         """Switch dark/light/system and redraw the open windows in the new colours."""
         self.cfg["theme"] = name
+        if chosen:
+            self.cfg["theme_chosen"] = True
         self.cfg.save()
         kit.set_theme(name)
         W.style(self.root)

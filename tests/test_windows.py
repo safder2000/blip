@@ -120,6 +120,7 @@ class WindowTests(unittest.TestCase):
             self.assertTrue(a.windows["settings"].alive())
             self.assertEqual(a.windows["settings"].page, "general")
             self.assertEqual(a.cfg["theme"], "light")
+            self.assertTrue(a.cfg["theme_chosen"])
             a.windows["settings"].close()
         finally:
             a.apply_theme("dark")
@@ -142,6 +143,32 @@ class WindowTests(unittest.TestCase):
         w.refresh()
         self.assertIn("Couldn't", w.upd_label.cget("text"))
         w.close()
+
+
+class ThemeDefaultTests(unittest.TestCase):
+    def test_new_and_old_installs_follow_the_system(self):
+        import json
+        from pathlib import Path
+        from blip.config import Config
+        d = Path(tempfile.mkdtemp())
+        self.assertEqual(Config(d / "new.json")["theme"], "system")
+        (d / "old.json").write_text(json.dumps({"cfg_version": 2, "theme": "dark"}))
+        self.assertEqual(Config(d / "old.json")["theme"], "system")         # v0.6.0 default, never picked
+        (d / "picked.json").write_text(json.dumps({"cfg_version": 2, "theme": "light", "theme_chosen": True}))
+        self.assertEqual(Config(d / "picked.json")["theme"], "light")
+
+    def test_follows_os_flip(self):
+        from unittest import mock
+        from blip import kit, plat
+        a = APP
+        a.cfg["theme"] = "system"
+        with mock.patch.object(plat, "system_dark", return_value=False):
+            a.follow_system_theme()
+        self.assertEqual(kit.THEME, "light")
+        with mock.patch.object(plat, "system_dark", return_value=True):
+            a.follow_system_theme()
+        self.assertEqual(kit.THEME, "dark")
+        self.assertFalse(a.cfg.get("theme_chosen") and a.cfg["theme"] != "system")
 
 
 class PhysicsTests(unittest.TestCase):

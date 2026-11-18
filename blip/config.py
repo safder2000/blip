@@ -55,7 +55,7 @@ DEFAULTS = {
     "sound": False,                # quiet by default; Settings > General > Sounds
     "volume": 60,
     "auto_update": True,
-    "theme": "dark",               # dark | light | system
+    "theme": "system",             # dark | light | system (follows Windows / macOS)
     "last_update_check": 0,
     "bc_token": "",
     "bc_refresh": "",
@@ -84,6 +84,11 @@ class Config(dict):
         if self.get("cfg_version", 1) < 2:   # v0.4: sounds became opt-in, for existing installs too
             self["sound"] = False
             self["cfg_version"] = 2
+            changed = True
+        if self.get("cfg_version", 1) < 3:   # v0.6.1: follow the OS theme unless the user picked one
+            if not self.get("theme_chosen"):
+                self["theme"] = "system"
+            self["cfg_version"] = 3
             changed = True
         if changed:
             self.save()
