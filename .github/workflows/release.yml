@@ -7,12 +7,18 @@ name: release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:          # re-run just the Mac build for an existing release
+    inputs:
+      tag:
+        description: "Release tag, e.g. v0.5.0"
+        required: true
 
 permissions:
   contents: write
 
 jobs:
   build:
+    if: github.event_name == 'push'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
@@ -63,9 +69,14 @@ jobs:
 
   mac:
     needs: build
-    runs-on: macos-14
+    if: always() && (needs.build.result == 'success' || github.event_name == 'workflow_dispatch')
+    runs-on: macos-latest
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - uses: actions/setup-python@v6
         with:
@@ -79,7 +90,7 @@ jobs:
           BC_CLIENT_ID: ${{ secrets.BASECAMP_CLIENT_ID }}
           BC_CLIENT_SECRET: ${{ secrets.BASECAMP_CLIENT_SECRET }}
         run: |
-          v="${GITHUB_REF_NAME#v}"
+          v="${TAG#v}"
           echo "VERSION=$v" >> "$GITHUB_ENV"
           python packaging/stamp.py "$v"
 
@@ -110,4 +121,4 @@ jobs:
           cd dist
           ditto -c -k --sequesterRsrc --keepParent Blip.app Blip-mac-arm64.zip
           shasum -a 256 Blip-mac-arm64.zip > Blip-mac-arm64.zip.sha256
-          gh release upload "$GITHUB_REF_NAME" Blip-mac-arm64.zip Blip-mac-arm64.zip.sha256 --clobber
+          gh release upload "$TAG" Blip-mac-arm64.zip Blip-mac-arm64.zip.sha256 --clobber
