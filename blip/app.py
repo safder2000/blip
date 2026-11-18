@@ -1,0 +1,1460 @@
+"""Blip - the pet window and everything it does."""
+import ctypes
+import math
+import queue
+import random
+import sys
+import time
+import traceback
+import tkinter as tk
+import uuid
+from pathlib import Path
+
+from . import __version__
+from .basecamp import Basecamp
+from .config import Config, data_dir, frozen, read_json, write_json
+from .net import Net
+from .sound import Sound
+from .sprites import (BANG, COL, FOOD, GH, GW, HEART, ICON, NOTE, POOP, SPARK, ZED, build_egg, build_pet,
+                      draw_text, text_width)
+from .timers import Timers, describe_days, fmt_clock, parse_clock, parse_duration
+from .ui import KEY, CardStack, pixel_box
+from . import updater as upd
+from . import windows as W
+
+FAST = 60.0 if "--fast" in sys.argv else 1.0
+HOUR = 3600.0
+EGG_TIME = 90
+BABY_END = 12 * HOUR
+CHILD_END = 48 * HOUR
+RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+RUN_NAME = "BlipPet"
+STAGE_NAMES = {"egg": "Egg", "baby": "Baby", "child": "Kid", "adult": "Grown-up"}
+CALL_RING_SECS = 60
+ANSWERS = {"coming": "On my way!", "2min": "Give me 2 minutes.", "busy": "Busy right now - I'll get back to you."}
+
+
+# ---------------------------------------------------------------- windows helpers
+if sys.platform == "win32":
+    from ctypes import wintypes
+
+    class _MONITORINFO(ctypes.Structure):
+        _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                    ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
+
+    _user32 = ctypes.windll.user32
+    _user32.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
+    _user32.MonitorFromPoint.restype = wintypes.HMONITOR
+    _user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(_MONITORINFO)]
+
+
+def work_area_at(root, x, y):
+    """Work area (l, t, r, b) of the monitor nearest to screen point x, y."""
+    if sys.platform == "win32":
+        try:
+            hmon = _user32.MonitorFromPoint(wintypes.POINT(int(x), int(y)), 2)
+            mi = _MONITORINFO()
+            mi.cbSize = ctypes.sizeof(mi)
+            if _user32.GetMonitorInfoW(hmon, ctypes.byref(mi)):
+                r = mi.rcWork
+                return r.left, r.top, r.right, r.bottom
+        except Exception:
+            pass
+    return 0, 0, root.winfo_screenwidth(), root.winfo_screenheight() - 40
+
+
+_MUTEX = None
+
+
+def single_instance(name):
+    global _MUTEX
+    if sys.platform != "win32":
+        return True
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateMutexW.restype = ctypes.c_void_p
+    _MUTEX = k32.CreateMutexW(None, False, name)
+    return ctypes.get_last_error() != 183  # ERROR_ALREADY_EXISTS
+
+
+def startup_command():
+    if frozen():
+        return f'"{sys.executable}"'
+    pyw = Path(sys.executable).with_name("pythonw.exe")
+    if not pyw.exists():
+        pyw = Path(sys.executable)
+    return f'"{pyw}" "{(Path(__file__).resolve().parent.parent / "blip_main.pyw")}"'
+
+
+# ---------------------------------------------------------------- pet state
+def fresh_state(gen=1, name="Blip"):
+    return {"name": name, "gen": gen, "stage": "egg", "palette": "baby", "age": 0.0,
+            "stats": {"full": 80.0, "happy": 80.0, "energy": 90.0, "hygiene": 100.0, "health": 100.0},
+            "sick": False, "asleep": False, "poops": [], "next_poop": None, "snacks": 0.0,
+            "care_good": 0.0, "care_total": 0.0, "gone": False, "x": None,
+            "wander": True, "wall": time.time(), "bc_seen": {}, "bc_summary_day": ""}
+
+
+def load_state(path):
+    st = read_json(path, None)
+    base = fresh_state()
+    if not isinstance(st, dict):
+        return base
+    stats = {**base["stats"], **st.get("stats", {})}
+    base.update(st)
+    base["stats"] = stats
+    return base
+
+
+def fmt_age(sec):
+    sec = int(sec)
+    d, h, m = sec // 86400, sec % 86400 // 3600, sec % 3600 // 60
+    if d:
+        return f"{d}d {h}h"
+    if h:
+        return f"{h}h {m}m"
+    return f"{m}m"
+
+
+# ---------------------------------------------------------------- app
+class App:
+    def __init__(self, data=None, start_services=True):
+        if sys.platform == "win32":
+            try:
+                ctypes.windll.shcore.SetProcessDpiAwareness(1)
+            except Exception:
+                pass
+        self.data = Path(data) if data else data_dir()
+        self.cfg = Config(self.data / "config.json")
+        self.root = root = tk.Tk()
+        root.report_callback_exception = self._on_error
+        root.title("Blip")
+        W.style(root)
+        S = self.S = root.winfo_fpixels("1i") / 96.0
+        self.P = max(3, round(4 * S))
+        self.bub_h = round(48 * S)
+        self.W = GW * self.P
+        self.H = self.bub_h + GH * self.P
+        root.overrideredirect(True)
+        root.attributes("-topmost", True)
+        if sys.platform == "win32":
+            root.attributes("-transparentcolor", KEY)
+        root.configure(bg=KEY)
+        self.cv = tk.Canvas(root, width=self.W, height=self.H, bg=KEY, highlightthickness=0, bd=0)
+        self.cv.pack()
+        self.font = ("Segoe UI", 9)
+
+        self.state_path = self.data / "state.json"
+        self.st = load_state(self.state_path)
+        self.timers = Timers(self.data / "timers.json")
+        self.inbox = read_json(self.data / "inbox.json", [])
+        self.sound = Sound(self.data, lambda: self.cfg["sound"])
+        self.cards = CardStack(self)
+        self.events = queue.Queue()
+        self.bc = Basecamp(self.cfg, self.post)
+        self.bc.on_items = self.on_bc_items
+        self.updater = upd.Updater(__version__, self.post)
+        self.net = None
+        self.net_error = None
+        self.calls_in, self.calls_out = {}, {}
+        self.alerts = {}
+        self.windows = {}
+        self.bc_snooze_until = 0.0
+        self.last_bc_nag = time.monotonic()
+
+        self.frame = 0
+        self.action, self.action_until = "idle", 0.0
+        self.dir = random.choice((-1, 1))
+        self.vy, self.airborne, self.land = 0.0, False, 0
+        self.phase = 0.0
+        self.food, self.food_t0 = None, 0.0
+        self.particles = []
+        self.bubble, self.bubble_until = "", 0.0
+        self.happy_until = 0.0
+        self.last_pat = 0.0
+        self.last_nag = time.monotonic()
+        self.last_save = time.monotonic()
+        self.top_row = 14
+        self.drag = None
+        self.poop_wins = []
+        self.ring_target = None
+        self.var_wander = tk.BooleanVar(value=self.st["wander"])
+        self.var_dnd = tk.BooleanVar(value=self.cfg["dnd"])
+
+        l, t, r, b = work_area_at(root, 10, 10)
+        x = self.st.get("x")
+        if x is None:
+            x = r - self.W - 140 * S
+        self.x = float(x)
+        self.work = work_area_at(root, self.x + self.W / 2, b - 5)
+        lo, hi = self.bounds()
+        self.x = min(max(self.x, lo), hi)
+        self.y = float(self.work[3] - self.H)
+        root.geometry(f"{self.W}x{self.H}+{int(self.x)}+{int(self.y)}")
+
+        cv = self.cv
+        cv.bind("<ButtonPress-1>", self.on_press)
+        cv.bind("<B1-Motion>", self.on_drag)
+        cv.bind("<ButtonRelease-1>", self.on_release)
+        cv.bind("<Button-3>", self.on_menu)
+
+        for px in self.st["poops"]:
+            self._poop_window(px)
+        gap = time.time() - self.st["wall"]
+        self.st["wall"] = time.time()
+        if self.st["gone"]:
+            self.set_action("gone", 1e18)
+        elif gap > 120:
+            self.catch_up(gap)
+        if self.st["stage"] == "egg" and not self.st["gone"]:
+            self.say("an egg appeared!" if self.st["age"] < 5 else "(the egg is warm)", 5)
+        if self.st["asleep"]:
+            self.set_action("sleep", 1e18)
+        self.check_growth()
+
+        self.physics()
+        self.anim()
+        root.after(1000, self.sim)
+        root.after(100, self.pump)
+        if start_services:
+            self.start_net()
+            root.after(int(random.uniform(60, 120) * 1000), self._update_loop)
+            root.after(15000, self._bc_loop)
+
+    # ------------------------------------------------ plumbing
+    def post(self, fn, *args):
+        """Run fn(*args) on the UI thread (safe to call from any thread)."""
+        self.events.put((fn, args))
+
+    def pump(self):
+        try:
+            while True:
+                fn, args = self.events.get_nowait()
+                try:
+                    fn(*args)
+                except Exception:
+                    self._on_error(*sys.exc_info())
+        except queue.Empty:
+            pass
+        self.root.after(100, self.pump)
+
+    def _on_error(self, *exc):
+        try:
+            with open(self.data / "error.log", "a", encoding="utf-8") as fh:
+                fh.write(time.ctime() + f" v{__version__}\n" + "".join(traceback.format_exception(*exc)) + "\n")
+        except Exception:
+            pass
+        traceback.print_exception(*exc)
+
+    def bounds(self):
+        l, t, r, b = self.work
+        pad = 6 * self.P
+        return l - pad, r - self.W + pad
+
+    def ground(self):
+        return self.work[3] - self.H
+
+    def say(self, text, secs=4.0):
+        self.bubble, self.bubble_until = text, time.monotonic() + secs
+
+    def set_action(self, a, secs):
+        self.action, self.action_until = a, time.monotonic() + secs
+
+    def spawn(self, kind, n=1):
+        for _ in range(n):
+            if kind == "heart":
+                self.particles.append([kind, 16 + random.randint(-7, 3), self.top_row - 3, 7])
+            elif kind == "spark":
+                self.particles.append([kind, random.randint(4, 26), random.randint(self.top_row - 2, GH - 4), 3])
+            elif kind == "z":
+                self.particles.append([kind, 19, self.top_row - 2, 6])
+            elif kind == "bang":
+                self.particles.append([kind, random.choice((5, 8, 23, 26)), self.top_row - 1, 3])
+            elif kind == "note":
+                self.particles.append([kind, random.randint(4, 26), self.top_row - 2, 5])
+
+    def hatched(self):
+        return not self.st["gone"] and self.st["stage"] != "egg"
+
+    def palette(self):
+        st = self.st
+        if st["gone"]:
+            return "ghost"
+        if st["sick"]:
+            return "sick"
+        return {"baby": "baby", "child": "child"}.get(st["stage"], st["palette"])
+
+    def mood(self):
+        st, a = self.st, self.action
+        if st["gone"]:
+            return "normal"
+        if a == "held":
+            return "held"
+        if a == "ring":
+            return "alert"
+        if st["asleep"]:
+            return "sleep"
+        if st["sick"]:
+            return "sick"
+        if a == "eat":
+            return "eat"
+        if a == "play" or time.monotonic() < self.happy_until:
+            return "happy"
+        s = st["stats"]
+        if min(s["full"], s["happy"], s["hygiene"]) < 20 or s["energy"] < 10:
+            return "sad"
+        return "normal"
+
+    def busy_or_unable(self, what):
+        st = self.st
+        if st["gone"]:
+            self.say("...")
+            return True
+        if st["stage"] == "egg":
+            self.say("(it's still an egg)")
+            return True
+        if st["asleep"] and what != "wake":
+            self.say("zzz... (asleep)")
+            return True
+        if self.action in ("eat", "held", "ring"):
+            return True
+        return False
+
+    # ------------------------------------------------ alerts (ringing)
+    def start_alert(self, key, sound="ring", dash=False):
+        self.alerts[key] = sound
+        self.sound.play(sound, loop=True)
+        if self.st["asleep"] and not self.st["gone"]:
+            self.st["asleep"] = False
+        if dash:
+            l, t, r, b = self.work
+            self.ring_target = (l + r) / 2 - self.W / 2
+        if self.hatched() and self.action != "held":
+            self.food = None
+            self.set_action("ring", 1e18)
+            self.jump()
+
+    def stop_alert(self, key):
+        if self.alerts.pop(key, None) is None:
+            return
+        if self.alerts:
+            self.sound.play(list(self.alerts.values())[-1], loop=True)
+        else:
+            self.sound.stop()
+            self.ring_target = None
+            if self.action == "ring":
+                self.choose()
+
+    # ------------------------------------------------ loops
+    def physics(self):
+        a = self.action
+        lo, hi = self.bounds()
+        ground = self.ground()
+        jitter = 0
+        if a == "held":
+            pass
+        elif a == "gone":
+            self.phase += 0.04
+            target = ground - 30 * self.S + math.sin(self.phase) * 6 * self.S
+            self.y += (target - self.y) * 0.05
+        elif self.airborne or self.y < ground - 0.5:
+            self.airborne = True
+            self.vy += 0.9 * self.S
+            self.y += self.vy
+            if a == "play":
+                self.x += self.dir * 2.0 * self.S
+            if self.y >= ground:
+                self.y, self.vy, self.airborne, self.land = ground, 0.0, False, 2
+                if a == "fall":
+                    self.set_action("idle", 1.5)
+                elif a == "play" and time.monotonic() < self.action_until:
+                    self.jump()
+        else:
+            self.y = ground
+            if a == "walk":
+                self.x += self.dir * (0.7 if self.st["sick"] else 1.5) * self.S
+            elif a == "play" and time.monotonic() < self.action_until:
+                self.jump()
+            elif a == "ring":
+                if self.ring_target is not None and abs(self.ring_target - self.x) > 4:
+                    step = 9 * self.S
+                    self.dir = 1 if self.ring_target > self.x else -1
+                    self.x += max(-step, min(step, self.ring_target - self.x))
+                else:
+                    jitter = (2 if self.frame % 2 else -2) * self.S
+                    if random.random() < 0.02:
+                        self.jump()
+        if a != "held":
+            if self.x < lo:
+                self.x, self.dir = lo, 1
+            elif self.x > hi:
+                self.x, self.dir = hi, -1
+        self.root.geometry(f"+{int(self.x + jitter)}+{int(self.y)}")
+        self.root.after(30, self.physics)
+
+    def jump(self):
+        self.vy = -8.5 * self.S
+        self.airborne = True
+        if self.action == "play" and random.random() < 0.3:
+            self.dir = -self.dir
+
+    def choose(self):
+        st = self.st
+        if self.alerts and self.hatched():
+            self.set_action("ring", 1e18)
+        elif st["gone"]:
+            self.set_action("gone", 1e18)
+        elif st["asleep"]:
+            self.set_action("sleep", 1e18)
+        elif st["stage"] != "egg" and st["wander"] and random.random() < (0.35 if st["sick"] else 0.55):
+            self.dir = random.choice((-1, 1))
+            self.set_action("walk", random.uniform(2, 6))
+        else:
+            self.set_action("idle", random.uniform(2, 7))
+
+    def anim(self):
+        self.frame += 1
+        now = time.monotonic()
+        a = self.action
+        if a in ("idle", "walk") and now >= self.action_until:
+            self.choose()
+        elif a == "eat" and now >= self.action_until:
+            self.finish_eat()
+        elif a == "play" and now >= self.action_until and not self.airborne:
+            self.set_action("idle", 2)
+        if self.st["asleep"] and self.frame % 5 == 0:
+            self.spawn("z")
+        if a == "ring" and self.frame % 2 == 0:
+            self.spawn("bang")
+        if self.land:
+            self.land -= 1
+        for p in self.particles:
+            p[2] -= 1
+            p[3] -= 1
+            if p[0] == "z" and self.frame % 2:
+                p[1] += 1
+        self.particles = [p for p in self.particles if p[3] > 0]
+        self.draw()
+        self.root.after(250, self.anim)
+
+    def sim(self):
+        now = time.time()
+        gap = max(0.0, now - self.st["wall"])
+        self.st["wall"] = now
+        if gap > 120:
+            self.catch_up(gap)
+        else:
+            self.step(gap * FAST)
+        if self.action != "held":
+            self.work = work_area_at(self.root, self.x + self.W / 2, self.y + self.H - 2)
+        for it in self.timers.tick(now):
+            self.timer_fired(it)
+        self.nag()
+        if time.monotonic() - self.last_save > 30:
+            self.save()
+        self.root.after(1000, self.sim)
+
+    # ------------------------------------------------ simulation (pet needs)
+    def step(self, dt):
+        st = self.st
+        s = st["stats"]
+        if st["gone"]:
+            return
+        st["age"] += dt
+        if st["stage"] == "egg":
+            if st["age"] >= EGG_TIME:
+                self.hatch()
+            return
+        h = dt / HOUR
+        if st["asleep"]:
+            s["full"] -= 4 * h
+            s["happy"] -= 1 * h
+            s["energy"] += 30 * h
+            s["hygiene"] -= 1 * h
+        else:
+            s["full"] -= 10 * h
+            s["happy"] -= 8 * h
+            s["energy"] -= 7 * h
+            s["hygiene"] -= (2 + 6 * len(st["poops"])) * h
+        if st["sick"]:
+            s["health"] -= 6 * h
+            s["happy"] -= 4 * h
+        if s["full"] <= 0:
+            s["health"] -= 15 * h
+        if s["hygiene"] < 15:
+            s["health"] -= 6 * h
+        if s["happy"] <= 0:
+            s["health"] -= 4 * h
+        if not st["sick"] and s["full"] > 40 and s["happy"] > 30 and s["hygiene"] > 40:
+            s["health"] += 6 * h
+        st["snacks"] = max(0.0, st["snacks"] - h)
+        self.clamp()
+
+        if not st["sick"] and (s["hygiene"] < 25 or s["full"] < 15 or st["snacks"] > 3) \
+                and random.random() < 0.6 * h:
+            st["sick"] = True
+            self.say("I don't feel so good...", 5)
+        if st["next_poop"] is not None and st["age"] >= st["next_poop"]:
+            st["next_poop"] = None
+            self.add_poop()
+        if not st["asleep"] and s["energy"] < 8 and self.action in ("idle", "walk"):
+            st["asleep"] = True
+            self.set_action("sleep", 1e18)
+            self.say("so sleepy...")
+        if st["asleep"] and s["energy"] >= 100:
+            st["asleep"] = False
+            self.say("good morning!")
+            self.choose()
+        if st["stage"] in ("baby", "child"):
+            st["care_total"] += dt
+            if min(s["full"], s["happy"], s["hygiene"]) > 35 and not st["sick"]:
+                st["care_good"] += dt
+        self.check_growth()
+        if s["health"] <= 0:
+            self.leave()
+
+    def catch_up(self, gap):
+        """Time passed while Blip was closed: gentler decay, never fatal."""
+        st = self.st
+        s = st["stats"]
+        if st["gone"]:
+            return
+        st["age"] += gap
+        if st["stage"] == "egg":
+            if st["age"] >= EGG_TIME:
+                self.hatch()
+            return
+        h = min(gap, 24 * HOUR) / HOUR
+        floor = 15.0
+        if st["asleep"]:
+            s["energy"] += 30 * h
+            rates = (("full", 1.5), ("happy", 0.5), ("hygiene", 0.5))
+        else:
+            rates = (("full", 3.3), ("happy", 2.7), ("energy", 2.3), ("hygiene", 1.0))
+        for k, rate in rates:
+            s[k] = max(min(s[k], floor), s[k] - rate * h)
+        self.clamp()
+        if st["next_poop"] is not None and st["age"] >= st["next_poop"]:
+            st["next_poop"] = None
+            self.add_poop()
+        if st["asleep"] and s["energy"] >= 100:
+            st["asleep"] = False
+        if st["stage"] in ("baby", "child"):
+            st["care_total"] += gap
+            st["care_good"] += gap * 0.5
+        self.check_growth()
+        if gap > 600:
+            self.say(random.choice(["welcome back!", "I missed you!", "you're back!"]), 5)
+            self.happy_until = time.monotonic() + 3
+
+    def clamp(self):
+        s = self.st["stats"]
+        for k in s:
+            s[k] = min(100.0, max(0.0, s[k]))
+
+    def check_growth(self):
+        st = self.st
+        if st["gone"]:
+            return
+        if st["stage"] == "baby" and st["age"] >= BABY_END:
+            st["stage"] = "child"
+            self.grew()
+        if st["stage"] == "child" and st["age"] >= CHILD_END:
+            ratio = st["care_good"] / max(1.0, st["care_total"])
+            st["palette"] = "gold" if ratio > 0.75 else "sky" if ratio > 0.45 else "plum"
+            st["stage"] = "adult"
+            self.grew()
+
+    def grew(self):
+        self.spawn("spark", 8)
+        self.say(f"{self.st['name']} grew up!", 5)
+        self.sound.play("done")
+        self.happy_until = time.monotonic() + 3
+        self.save()
+
+    def hatch(self):
+        st = self.st
+        st["stage"] = "baby"
+        st["age"] = max(st["age"], EGG_TIME)
+        self.spawn("spark", 8)
+        self.say(f"hi! I'm {st['name']}!", 5)
+        self.sound.play("done")
+        self.happy_until = time.monotonic() + 4
+        self.set_action("idle", 2)
+        self.save()
+
+    def leave(self):
+        st = self.st
+        st.update(gone=True, asleep=False, sick=False)
+        for win, _ in self.poop_wins:
+            win.destroy()
+        self.poop_wins, st["poops"] = [], []
+        self.set_action("gone", 1e18)
+        self.sound.play("sad")
+        self.say(f"{st['name']} floated off to the pet planet... (right-click: new egg)", 12)
+        self.save()
+
+    def nag(self):
+        st = self.st
+        now = time.monotonic()
+        if st["gone"] or st["asleep"] or st["stage"] == "egg" or now < self.bubble_until or self.alerts:
+            return
+        overdue = [i for i in self.bc.items if i["scope"] == "overdue"]
+        if overdue and self.cfg["bc_enabled"] and now - self.last_bc_nag > 45 * 60 \
+                and time.time() > self.bc_snooze_until:
+            self.last_bc_nag = now
+            self.say(f"{len(overdue)} overdue Basecamp task{'s' if len(overdue) > 1 else ''}...")
+            return
+        if now - self.last_nag < 30:
+            return
+        s = st["stats"]
+        msg = None
+        if st["sick"]:
+            msg = "I feel sick... (medicine?)"
+        elif len(st["poops"]) >= 3:
+            msg = "it's getting smelly!"
+        else:
+            needs = [(s["full"], "I'm hungry!"), (s["happy"], "play with me?"),
+                     (s["energy"], "so tired..."), (s["hygiene"], "I feel icky...")]
+            val, text = min(needs)
+            if val < 25:
+                msg = text
+            elif random.random() < 0.06:
+                msg = random.choice(["♪", "la la la~", "hi!", "♪♪", "*hums*"])
+        if msg:
+            self.say(msg)
+            self.last_nag = now
+
+    # ------------------------------------------------ care actions
+    def feed(self, kind):
+        if self.busy_or_unable("feed"):
+            return
+        st, s = self.st, self.st["stats"]
+        if kind == "meal":
+            if s["full"] >= 92:
+                self.say("I'm full!")
+                return
+            s["full"] += 35
+            s["happy"] += 3
+            if st["next_poop"] is None:
+                st["next_poop"] = st["age"] + random.uniform(25, 70) * 60
+        else:
+            s["full"] += 10
+            s["happy"] += 15
+            st["snacks"] += 1
+            if st["snacks"] > 3:
+                s["health"] -= 6
+            if st["next_poop"] is None and random.random() < 0.3:
+                st["next_poop"] = st["age"] + random.uniform(20, 60) * 60
+        self.clamp()
+        self.food, self.food_t0 = kind, time.monotonic()
+        self.set_action("eat", 2.5)
+
+    def finish_eat(self):
+        kind, self.food = self.food, None
+        if kind == "pill":
+            self.say("feeling better!")
+        elif kind == "snack" and self.st["snacks"] > 3:
+            self.say("my tummy hurts...")
+        else:
+            self.say(random.choice(["yum!", "nom nom", "tasty!"]))
+            self.happy_until = time.monotonic() + 2
+            self.spawn("heart")
+        self.set_action("idle", 2)
+
+    def play(self):
+        if self.busy_or_unable("play"):
+            return
+        s = self.st["stats"]
+        if self.st["sick"]:
+            self.say("too sick to play...")
+            return
+        if s["energy"] < 15:
+            self.say("too tired...")
+            return
+        if s["full"] < 10:
+            self.say("too hungry to play...")
+            return
+        s["happy"] += 20
+        s["energy"] -= 10
+        s["full"] -= 5
+        s["hygiene"] -= 3
+        self.clamp()
+        self.set_action("play", 3.5)
+        self.jump()
+        self.spawn("heart", 2)
+        self.sound.play("pop")
+        self.say(random.choice(["wheee!", "yay!", "again!"]))
+
+    def clean(self):
+        st = self.st
+        if st["gone"]:
+            return
+        n = len(st["poops"])
+        for win, _ in self.poop_wins:
+            win.destroy()
+        self.poop_wins, st["poops"] = [], []
+        was = st["stats"]["hygiene"]
+        st["stats"]["hygiene"] = 100.0
+        self.spawn("spark", 6)
+        self.say("squeaky clean!" if n or was < 70 else "already clean~")
+
+    def medicine(self):
+        if self.busy_or_unable("medicine"):
+            return
+        st = self.st
+        if not st["sick"]:
+            self.say("I'm not sick! bleh")
+            st["stats"]["happy"] -= 5
+            self.clamp()
+            return
+        st["sick"] = False
+        st["stats"]["health"] += 25
+        self.clamp()
+        self.food, self.food_t0 = "pill", time.monotonic()
+        self.set_action("eat", 2.0)
+
+    def toggle_sleep(self):
+        st = self.st
+        if self.busy_or_unable("wake"):
+            return
+        if st["asleep"]:
+            st["asleep"] = False
+            self.say("*yawn*... still sleepy" if st["stats"]["energy"] < 40 else "morning!")
+            self.choose()
+        else:
+            if st["stats"]["energy"] > 85:
+                self.say("not sleepy!")
+                return
+            st["asleep"] = True
+            self.set_action("sleep", 1e18)
+            self.say("good night...")
+
+    def pat(self):
+        st = self.st
+        now = time.monotonic()
+        if self.alerts:
+            self.open_cards_front()
+            return
+        if st["gone"]:
+            self.say("...")
+            return
+        if st["stage"] == "egg":
+            self.say("(the egg wiggles)")
+            return
+        if st["asleep"]:
+            self.say("zzz...")
+            return
+        self.happy_until = now + 1.5
+        self.spawn("heart")
+        if now - self.last_pat > 2:
+            st["stats"]["happy"] += 4
+            self.clamp()
+        self.last_pat = now
+        if random.random() < 0.35:
+            self.say(random.choice(["hehe", "♥", "more!", "purr~"]), 2)
+
+    def open_cards_front(self):
+        for c in self.cards.cards:
+            try:
+                c.win.lift()
+            except tk.TclError:
+                pass
+
+    def new_egg(self):
+        st = self.st
+        for win, _ in self.poop_wins:
+            win.destroy()
+        self.poop_wins = []
+        self.st = fresh_state(st["gen"] + 1, st["name"])
+        self.st["x"], self.st["wander"] = int(self.x), st["wander"]
+        self.set_action("idle", 2)
+        self.say("a new egg!", 5)
+        self.save()
+
+    # ------------------------------------------------ poops
+    def add_poop(self):
+        st = self.st
+        if len(st["poops"]) >= 6:
+            st["stats"]["hygiene"] -= 10
+            self.clamp()
+            return
+        l, t, r, b = self.work
+        px = self.x + self.W / 2 - self.dir * 10 * self.P
+        px = min(max(px, l + 6 * self.P), r - 6 * self.P)
+        st["poops"].append(px)
+        st["stats"]["hygiene"] -= 5
+        self.clamp()
+        self._poop_window(px)
+        self.say("oops...", 3)
+
+    def _poop_window(self, px):
+        P = self.P
+        w, h = 8 * P, len(POOP) * P
+        l, t, r, b = work_area_at(self.root, px, self.work[3] - 2)
+        win = tk.Toplevel(self.root)
+        win.overrideredirect(True)
+        win.attributes("-topmost", True)
+        if sys.platform == "win32":
+            win.attributes("-transparentcolor", KEY)
+        c = tk.Canvas(win, width=w, height=h, bg=KEY, highlightthickness=0, bd=0, cursor="hand2")
+        c.pack()
+        for y, row in enumerate(POOP):
+            for x, ch in enumerate(row):
+                if ch != ".":
+                    c.create_rectangle(x * P, y * P, (x + 1) * P, (y + 1) * P, width=0,
+                                       fill=COL["out"] if ch == "o" else COL["poop"])
+        win.geometry(f"{w}x{h}+{int(px - w / 2)}+{int(b - h)}")
+        entry = (win, px)
+        c.bind("<Button-1>", lambda e: self.clean_one(entry))
+        self.poop_wins.append(entry)
+        self.root.lift()
+
+    def clean_one(self, entry):
+        win, px = entry
+        if entry in self.poop_wins:
+            self.poop_wins.remove(entry)
+        if px in self.st["poops"]:
+            self.st["poops"].remove(px)
+        win.destroy()
+        self.st["stats"]["hygiene"] += 8
+        self.clamp()
+        if not self.st["gone"] and not self.st["asleep"]:
+            self.say("thanks!", 2)
+
+    # ------------------------------------------------ timers & alarms
+    def start_timer(self, secs, label=""):
+        it = self.timers.add_timer(secs, label)
+        self.say(f"timer: {fmt_clock(secs)}" + (f" ({label})" if label else ""), 3)
+        self.sound.play("pop")
+        self.draw()
+        return it
+
+    def start_stopwatch(self, label=""):
+        self.timers.add_stopwatch(label)
+        self.say("stopwatch started", 3)
+        self.sound.play("pop")
+        self.draw()
+
+    def add_alarm(self, hh, mm, days, label=""):
+        self.timers.add_alarm(hh, mm, days, label)
+        self.say(f"alarm {hh:02d}:{mm:02d} ({describe_days(days)})", 4)
+        self.sound.play("pop")
+
+    def ask_timer(self):
+        txt = W.ask_text(self, "New timer", "How long? (25, 1:30, 90s, 2h 15m)", initial="25")
+        if txt is None:
+            return
+        secs = parse_duration(txt)
+        if not secs:
+            self.say("hmm, I didn't get that time")
+            return
+        self.start_timer(secs)
+
+    def ask_alarm(self):
+        txt = W.ask_text(self, "New alarm", "Ring at what time today? (e.g. 13:00 or 5pm)",
+                         initial=time.strftime("%H:%M", time.localtime(time.time() + 3600)))
+        if txt is None:
+            return
+        hm = parse_clock(txt)
+        if not hm:
+            self.say("hmm, I didn't get that time")
+            return
+        self.add_alarm(hm[0], hm[1], [])
+
+    def timer_fired(self, it):
+        key = f"tm:{it['id']}"
+        label = it.get("label") or ""
+        if it["kind"] == "timer":
+            title, icon = "Time's up!", "hourglass"
+            body = (f"{label}\n" if label else "") + f"Your {fmt_clock(it['dur'])} timer is done."
+            buttons = [("Stop", lambda: None),
+                       ("+5 min", lambda: (self.start_timer(5 * 60, label), None)[1])]
+        else:
+            title, icon = "Alarm", "bell"
+            body = (f"{label}\n" if label else "") + f"It's {it['hh']:02d}:{it['mm']:02d}."
+            iid = it["id"]
+            buttons = [("Stop", lambda: None),
+                       ("Snooze 5", lambda: (self.timers.snooze(iid, 5), None)[1]),
+                       ("Snooze 10", lambda: (self.timers.snooze(iid, 10), None)[1])]
+        self.start_alert(key, "alarm")
+        self.cards.show(title, body, buttons, kind="alarm" if it["kind"] == "alarm" else "timer", icon=icon,
+                        key=key, timeout=180, on_close=lambda why: self.stop_alert(key))
+
+    # ------------------------------------------------ office network
+    def profile(self):
+        return {"name": self.cfg["display_name"], "status": "busy" if self.cfg["dnd"] else "available",
+                "stage": self.st["stage"], "palette": self.palette(), "ver": __version__}
+
+    def start_net(self):
+        self.net_error = None
+        if not self.cfg["network"]:
+            self.net = None
+            return
+        peers = [p for p in self.cfg["manual_peers"].replace(";", ",").split(",")]
+        self.net = Net(self.cfg["node_id"], self.profile, self.cfg["passphrase"],
+                       lambda kind, d: self.post(self.on_net, kind, d),
+                       relay=self.cfg["relay"], manual_peers=peers)
+        if not self.net.start():
+            self.net_error = self.net.error
+            self.net = None
+
+    def restart_net(self):
+        if self.net:
+            self.net.stop()
+        self.start_net()
+
+    def net_rescan(self):
+        if self.net:
+            self.net.announce_now()
+
+    def net_status(self):
+        if not self.cfg["network"]:
+            return "Office network is off (Settings)."
+        if not self.net:
+            return f"Network problem: {self.net_error}"
+        n = len(self.net.online())
+        relay = "  - relay connected" if self.net.relay_sock else ("  - relay not reachable" if self.cfg["relay"] else "")
+        return f"{n} pet{'s' if n != 1 else ''} nearby{relay}"
+
+    def set_dnd(self, on):
+        self.cfg["dnd"] = bool(on)
+        self.cfg.save()
+        self.var_dnd.set(self.cfg["dnd"])
+        self.net_rescan()
+        self.say("do not disturb: on" if on else "do not disturb: off", 3)
+
+    def log_inbox(self, direction, peer, name, text):
+        self.inbox.append({"ts": time.time(), "dir": direction, "peer": peer, "name": name, "text": text[:500]})
+        self.inbox = self.inbox[-100:]
+        self.save_inbox()
+
+    def save_inbox(self):
+        write_json(self.data / "inbox.json", self.inbox)
+
+    def peer_name(self, pid, fallback="Someone"):
+        p = self.net.peer(pid) if self.net else None
+        return (p or {}).get("name") or fallback
+
+    def on_net(self, kind, d):
+        if kind == "peers" or not d:
+            return
+        src, body = d["from"], d.get("body") or {}
+        name = self.peer_name(src)
+        if kind == "call":
+            self.incoming_call(src, name, str(body.get("call_id", ""))[:40])
+        elif kind == "call_cancel":
+            cid = str(body.get("call_id", ""))
+            if cid in self.calls_in:
+                self.cards.close(f"in:{cid}", why="cancel")
+        elif kind == "call_reply":
+            self.call_answered(src, name, str(body.get("call_id", "")), str(body.get("text", ""))[:300])
+        elif kind == "msg":
+            self.incoming_msg(src, name, str(body.get("text", ""))[:500])
+
+    def call(self, pid):
+        if not self.net:
+            self.say("office network is off")
+            return
+        name = self.peer_name(pid)
+        cid = uuid.uuid4().hex[:12]
+        self.calls_out[cid] = {"peer": pid, "name": name}
+        key = f"out:{cid}"
+
+        def closed(why):
+            info = self.calls_out.pop(cid, None)
+            if info and why in ("button", "x", "timeout") and self.net:
+                self.net.send(pid, "call_cancel", {"call_id": cid})
+            if info and why == "timeout":
+                self.cards.show("No answer", f"{name} didn't pick up.",
+                                [("Message", lambda: self.compose(pid, name=name)), ("OK", lambda: None)],
+                                kind="call", icon="phone", timeout=30)
+
+        self.cards.show(f"Calling {name}", f"Ringing {name}'s Blip...", [("Hang up", lambda: None)],
+                        kind="call", icon="phone", key=key, timeout=CALL_RING_SECS + 5, on_close=closed)
+        self.log_inbox("out", pid, name, "\U0001F4DE called")
+        if self.hatched():
+            self.jump()
+
+        def sent(ok):
+            if not ok:
+                self.post(self._call_failed, cid, name)
+        self.net.send(pid, "call", {"call_id": cid}, sent)
+
+    def _call_failed(self, cid, name):
+        if self.calls_out.pop(cid, None) is not None:
+            self.cards.close(f"out:{cid}")
+            self.cards.show("Can't reach", f"Couldn't reach {name}'s Blip. They may be offline.", [("OK", lambda: None)],
+                            kind="call", icon="phone", timeout=20)
+
+    def incoming_call(self, src, name, cid):
+        self.log_inbox("in", src, name, "\U0001F4DE called you")
+        if self.cfg["dnd"]:
+            self.net.send(src, "call_reply", {"call_id": cid, "text": "Busy right now (do not disturb)."})
+            self.cards.show("Missed call", f"{name} called while you were on do not disturb.",
+                            [("Call back", lambda: self.call(src)), ("OK", lambda: None)],
+                            kind="call", icon="phone", key=f"missed:{src}")
+            return
+        key = f"in:{cid}"
+        self.calls_in[cid] = {"peer": src, "name": name}
+
+        def answer(code):
+            def go():
+                text = ANSWERS.get(code)
+                if code == "custom":
+                    text = W.ask_text(self, f"Reply to {name}", "Your reply:")
+                    if not text:
+                        return True
+                self.net.send(src, "call_reply", {"call_id": cid, "text": text[:300]})
+                self.log_inbox("out", src, name, text)
+                self.calls_in.pop(cid, None)
+                if self.hatched():
+                    self.happy_until = time.monotonic() + 2
+            return go
+
+        def closed(why):
+            self.stop_alert(key)
+            if self.calls_in.pop(cid, None) is not None and why in ("timeout", "cancel"):
+                self.cards.show("Missed call", f"{name} called you.",
+                                [("Call back", lambda: self.call(src)), ("OK", lambda: None)],
+                                kind="call", icon="phone", key=f"missed:{src}")
+
+        self.start_alert(key, "ring", dash=True)
+        self.cards.show("Incoming call", f"{name} is calling you!",
+                        [("Coming", answer("coming")), ("2 min", answer("2min")), ("Busy", answer("busy")),
+                         ("Reply...", answer("custom"))],
+                        kind="call", icon="phone", key=key, timeout=CALL_RING_SECS, on_close=closed)
+
+    def call_answered(self, src, name, cid, text):
+        if self.calls_out.pop(cid, None) is None:
+            return
+        self.cards.close(f"out:{cid}")
+        self.log_inbox("in", src, name, text)
+        self.sound.play("ding")
+        self.cards.show(name, text or "answered", [("OK", lambda: None), ("Message", lambda: self.compose(src, name=name))],
+                        kind="call", icon="phone", timeout=45)
+        if self.hatched():
+            self.happy_until = time.monotonic() + 2
+            self.jump()
+
+    def incoming_msg(self, src, name, text):
+        self.log_inbox("in", src, name, text)
+        if not self.cfg["dnd"]:
+            self.sound.play("ding")
+        if self.hatched() and self.action in ("idle", "walk"):
+            self.jump()
+        self.cards.show("Message", f"{name}: {text}",
+                        [("Reply", lambda: self.compose(src, name=name)), ("OK", lambda: None)],
+                        kind="msg", icon="mail")
+
+    def compose(self, pid, parent=None, name=None):
+        if not self.net:
+            self.say("office network is off")
+            return
+        name = name or self.peer_name(pid)
+        text = W.ask_text(self, f"Message {name}", f"Message to {name}:", parent=parent)
+        if not text or not text.strip():
+            return
+        text = text.strip()[:500]
+
+        def sent(ok):
+            self.post(self.say, "sent!" if ok else f"couldn't reach {name}", 3)
+        self.log_inbox("out", pid, name, text)
+        self.net.send(pid, "msg", {"text": text}, sent)
+
+    # ------------------------------------------------ basecamp
+    def _bc_loop(self):
+        if self.bc.connected and self.cfg["bc_enabled"]:
+            self.bc.refresh()
+        self.root.after(15 * 60 * 1000, self._bc_loop)
+
+    def on_bc_items(self, items, error):
+        win = self.windows.get("tasks")
+        if win and win.alive():
+            win.refresh()
+        if error or not self.cfg["bc_enabled"] or time.time() < self.bc_snooze_until:
+            return
+        today = time.strftime("%Y-%m-%d")
+        seen = {k: v for k, v in self.st.get("bc_seen", {}).items() if v == today}
+        new = [i for i in items if str(i["id"]) not in seen]
+        morning = parse_clock(self.cfg.get("bc_morning") or "") or (9, 30)
+        now_hm = time.localtime()[3:5]
+        summary_due = self.st.get("bc_summary_day") != today and now_hm >= morning
+        show = items if summary_due else new
+        if show:
+            self.st["bc_summary_day"] = today if summary_due else self.st.get("bc_summary_day", "")
+            for i in items:
+                seen[str(i["id"])] = today
+            self.bc_card(show, summary_due)
+        self.st["bc_seen"] = seen
+
+    def bc_card(self, items, summary):
+        over = [i for i in items if i["scope"] == "overdue"]
+        today = [i for i in items if i["scope"] != "overdue"]
+        lines = []
+        for i in (over + today)[:5]:
+            tag = "OVERDUE" if i["scope"] == "overdue" else "today"
+            lines.append(f"• {i['content']}  ({tag}{', ' + i['project'] if i.get('project') else ''})")
+        if len(items) > 5:
+            lines.append(f"+ {len(items) - 5} more")
+        head = []
+        if over:
+            head.append(f"{len(over)} overdue")
+        if today:
+            head.append(f"{len(today)} due today")
+        title = "Your Basecamp day" if summary else "Basecamp"
+        self.sound.play("ding")
+        if self.hatched():
+            self.jump()
+
+        def snooze():
+            self.bc_snooze_until = time.time() + 3600
+            self.root.after(3600 * 1000 + 5000, lambda: self.bc_card(self.bc.items, False) if self.bc.items else None)
+        self.cards.show(title, ", ".join(head) + ":\n" + "\n".join(lines),
+                        [("Show all", lambda: self.open_window("tasks")), ("Snooze 1h", snooze), ("OK", lambda: None)],
+                        kind="task", icon="task", key="bc")
+
+    def complete_task(self, item):
+        if item.get("type") not in ("todo", "Todo", None):
+            self.say("only to-dos can be ticked off here")
+            return
+
+        def done(ok, err):
+            if ok:
+                self.sound.play("done")
+                self.spawn("spark", 6)
+                self.happy_until = time.monotonic() + 3
+                self.say("done! ✓", 3)
+                self.st["stats"]["happy"] += 5
+                self.clamp()
+            else:
+                self.say("couldn't tick it off...", 4)
+            win = self.windows.get("tasks")
+            if win and win.alive():
+                win.refresh()
+        self.bc.complete(item, done)
+
+    # ------------------------------------------------ updates
+    def _update_loop(self):
+        self.check_updates(manual=False)
+        self.root.after(int(6 * 3600 * 1000 + random.uniform(0, 1800) * 1000), self._update_loop)
+
+    def check_updates(self, manual=False):
+        self.updater.check(lambda info, err: self.on_update_info(info, err, manual))
+        if manual:
+            self.say("checking for updates...", 3)
+
+    def on_update_info(self, info, err, manual):
+        if err:
+            if manual:
+                self.cards.show("Update check", f"Couldn't check for updates.\n{err}", [("OK", lambda: None)],
+                                kind="update", icon="task", timeout=30)
+            return
+        if not info:
+            if manual:
+                self.cards.show("Up to date", f"You have the latest Blip (v{__version__}).", [("OK", lambda: None)],
+                                kind="update", icon="check", timeout=20)
+            return
+        if frozen() and (self.cfg["auto_update"] or manual):
+            self.install_update(info)
+        elif frozen():
+            self.cards.show("Update ready", f"Blip v{info['version']} is out.",
+                            [("Update now", lambda: self.install_update(info)), ("Later", lambda: None)],
+                            kind="update", icon="task", key="update")
+        else:
+            self.cards.show("Update", f"Blip v{info['version']} is out (you're running from source: git pull).",
+                            [("OK", lambda: None)], kind="update", icon="task", key="update", timeout=60)
+
+    def install_update(self, info):
+        if self.alerts or self.calls_out or self.calls_in:
+            self.root.after(10 * 60 * 1000, lambda: self.install_update(info))
+            return
+        self.say(f"updating to v{info['version']}...", 30)
+        self.updater.fetch(info, self.on_update_ready)
+
+    def on_update_ready(self, path, err):
+        if err:
+            self.cards.show("Update failed", f"Couldn't download the update.\n{err}", [("OK", lambda: None)],
+                            kind="update", icon="task", timeout=60)
+            return
+        self.save()
+        if self.net:
+            self.net.stop()
+        upd.launch_installer(path)
+        self.root.after(300, self.root.destroy)
+
+    # ------------------------------------------------ startup registry
+    def startup_enabled(self):
+        if sys.platform != "win32":
+            return False
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as k:
+                winreg.QueryValueEx(k, RUN_NAME)
+            return True
+        except OSError:
+            return False
+
+    def set_startup(self, on):
+        if sys.platform != "win32" or FAST > 1:
+            return
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as k:
+            if on:
+                winreg.SetValueEx(k, RUN_NAME, 0, winreg.REG_SZ, startup_command())
+            else:
+                try:
+                    winreg.DeleteValue(k, RUN_NAME)
+                except OSError:
+                    pass
+
+    # ------------------------------------------------ drawing
+    def draw(self):
+        cv, st, P, oy = self.cv, self.st, self.P, self.bub_h
+        cv.delete("px")
+        if st["stage"] == "egg" and not st["gone"]:
+            g = build_egg(self.frame, min(1.0, st["age"] / EGG_TIME))
+        else:
+            a = self.action
+            facing = self.dir if a in ("walk", "play", "eat") or (a == "ring" and self.ring_target) else 0
+            if a == "walk":
+                squash = self.frame % 2 == 0
+            elif st["asleep"]:
+                squash = self.frame % 8 < 4
+            elif a == "ring":
+                squash = self.frame % 2 == 0
+            else:
+                squash = self.frame % 6 == 0
+            squash = squash or self.land > 0
+            mood = self.mood()
+            blink = mood in ("normal", "sad") and random.random() < 0.08
+            g = build_pet(st["stage"], self.palette(), mood, self.frame, facing, squash, blink)
+        self.top_row = min(y for _, y in g)
+
+        if self.food and self.action == "eat":
+            prog = min(1.0, (time.monotonic() - self.food_t0) / 2.2)
+            cells = FOOD[self.food]
+            edible = [c for c in cells if c[2] != "bowl"]
+            keep = edible[int(len(edible) * prog):] + [c for c in cells if c[2] == "bowl"]
+            fx = 26 if self.dir > 0 else 1
+            for x, y, c in keep:
+                g[(fx + x, GH - 4 + y)] = COL[c]
+        for kind, x, y, _ in self.particles:
+            cells, col = {"heart": (HEART, COL["heart"]), "z": (ZED, COL["z"]), "spark": (SPARK, COL["spark"]),
+                          "bang": (BANG, COL["alert"]), "note": (NOTE, COL["z"])}[kind]
+            for dx, dy in cells:
+                if 0 <= x + dx < GW:
+                    g[(x + dx, y + dy)] = col
+        for (x, y), c in g.items():
+            if y * P + oy >= 0:
+                cv.create_rectangle(x * P, oy + y * P, (x + 1) * P, oy + (y + 1) * P,
+                                    fill=c, width=0, tags="px")
+        cv.delete("bub")
+        if self.bubble and time.monotonic() < self.bubble_until:
+            self.draw_bubble()
+        else:
+            self.draw_sign()
+
+    def draw_sign(self):
+        disp = self.timers.display()
+        if not disp:
+            return
+        icon, text, it = disp
+        cv, S = self.cv, self.S
+        px = max(1, round(2 * S))
+        full = ICON[icon] + " " + text
+        tw = text_width(full, px)
+        w, h = tw + 8 * px, 7 * px + 6 * px
+        x0 = int(self.W / 2 - w / 2)
+        y1 = int(self.bub_h + (self.top_row - 1) * self.P - 2 * px)
+        y0 = y1 - h
+        paused = (it["kind"] == "timer" and it["left"] is not None) or (it["kind"] == "stopwatch" and not it["running"])
+        urgent = it["kind"] == "timer" and it["left"] is None and self.timers.remaining(it) <= 10
+        fill = "#fff4c2" if paused else ("#ffd6dc" if urgent and self.frame % 2 else "#e9fbe9")
+        pixel_box(cv, x0, y0, x0 + w, y1, px, COL["out"], ("bub", "sign"))
+        pixel_box(cv, x0 + px, y0 + px, x0 + w - px, y1 - px, px, fill, ("bub", "sign"))
+        if not (paused and self.frame % 4 == 0):
+            draw_text(cv, x0 + 4 * px, y0 + 3 * px, full, px, COL["out"], ("bub", "sign"))
+        n = self.timers.active_count()
+        if n > 1:
+            draw_text(cv, x0 + w + 2 * px, y0, f"+{n - 1}", px, COL["out"], ("bub", "sign"))
+
+    def draw_bubble(self):
+        cv, S = self.cv, self.S
+        cx = self.W / 2
+        ty = self.bub_h + (self.top_row - 3) * self.P - 8 * S
+        ty = max(ty, 30 * S)
+        t = cv.create_text(cx, ty, text=self.bubble, font=self.font, fill=COL["out"],
+                           anchor="s", width=self.W - 14 * S, justify="center", tags="bub")
+        x1, y1, x2, y2 = cv.bbox(t)
+        x1, y1, x2, y2 = x1 - 6 * S, y1 - 3 * S, x2 + 6 * S, y2 + 3 * S
+        if y1 < 1:
+            cv.move(t, 0, 1 - y1)
+            y2 += 1 - y1
+            y1 = 1
+        lw = max(1, round(S))
+        cv.create_polygon(cx - 4 * S, y2 - lw, cx + 4 * S, y2 - lw, cx, y2 + 6 * S,
+                          fill=COL["white"], outline=COL["out"], width=lw, tags="bub")
+        cv.create_rectangle(x1, y1, x2, y2, fill=COL["white"], outline=COL["out"], width=lw, tags="bub")
+        cv.create_rectangle(cx - 4 * S + lw, y2 - lw, cx + 4 * S - lw + 1, y2 + 1,
+                            fill=COL["white"], width=0, tags="bub")
+        cv.tag_raise(t)
+
+    # ------------------------------------------------ input
+    def on_press(self, e):
+        if "sign" in self.cv.gettags("current"):
+            self.drag = None
+            self.open_window("timers")
+            return
+        self.drag = [e.x_root - self.x, e.y_root - self.y, e.x_root, e.y_root, False]
+
+    def on_drag(self, e):
+        d = self.drag
+        if not d:
+            return
+        if not d[4] and abs(e.x_root - d[2]) + abs(e.y_root - d[3]) > 5:
+            d[4] = True
+            if self.st["asleep"] and not self.st["gone"]:
+                self.st["asleep"] = False
+                self.st["stats"]["happy"] -= 5
+                self.clamp()
+                self.say("hey! I was sleeping!")
+            if self.action != "gone":
+                self.set_action("held", 1e18)
+                self.food = None
+                self.ring_target = None
+        if d[4]:
+            self.x, self.y = e.x_root - d[0], e.y_root - d[1]
+
+    def on_release(self, e):
+        d, self.drag = self.drag, None
+        if not d:
+            return
+        if d[4]:
+            self.work = work_area_at(self.root, e.x_root, e.y_root)
+            lo, hi = self.bounds()
+            self.x = min(max(self.x, lo), hi)
+            if self.action == "held":
+                self.vy = 0.0
+                self.airborne = True
+                self.set_action("fall", 5)
+                if self.alerts:
+                    self.root.after(1500, lambda: self.alerts and self.set_action("ring", 1e18))
+            self.cards.layout()
+            self.save()
+        else:
+            self.pat()
+
+    def on_menu(self, e):
+        st = self.st
+        alive = not st["gone"]
+        hatched = self.hatched()
+        on = lambda ok: "normal" if ok else "disabled"  # noqa: E731
+        m = tk.Menu(self.root, tearoff=0)
+        care = tk.Menu(m, tearoff=0)
+        care.add_command(label="Feed meal", command=lambda: self.feed("meal"), state=on(hatched))
+        care.add_command(label="Give snack", command=lambda: self.feed("snack"), state=on(hatched))
+        care.add_command(label="Play", command=self.play, state=on(hatched))
+        n = len(st["poops"])
+        care.add_command(label="Clean up" + (f" ({n})" if n else ""), command=self.clean, state=on(alive))
+        care.add_command(label="Medicine", command=self.medicine, state=on(hatched))
+        care.add_command(label="Wake up" if st["asleep"] else "Put to sleep", command=self.toggle_sleep,
+                         state=on(hatched))
+        care.add_separator()
+        care.add_command(label="Pet status…", command=lambda: self.open_window("status"))
+        care.add_command(label="Rename…", command=self.rename, state=on(alive))
+        if st["gone"]:
+            care.add_command(label="Hatch a new egg", command=self.new_egg)
+        m.add_cascade(label=f"Care for {st['name']}", menu=care)
+        m.add_separator()
+
+        tm = tk.Menu(m, tearoff=0)
+        for mins in (1, 5, 10, 15, 25, 30, 45, 60):
+            tm.add_command(label=f"{mins} min", command=lambda s=mins * 60: self.start_timer(s))
+        tm.add_command(label="Other…", command=self.ask_timer)
+        m.add_cascade(label="Timer", menu=tm)
+        m.add_command(label="Stopwatch", command=self.start_stopwatch)
+        m.add_command(label="Alarm…", command=self.ask_alarm)
+        m.add_command(label="Timers & alarms…", command=lambda: self.open_window("timers"))
+        m.add_separator()
+
+        peers = self.net.online() if self.net else []
+        call_m, msg_m = tk.Menu(m, tearoff=0), tk.Menu(m, tearoff=0)
+        for p in peers:
+            label = p.get("name", "?") + ("  (dnd)" if p.get("status") == "busy" else "")
+            call_m.add_command(label=label, command=lambda pid=p["id"]: self.call(pid))
+            msg_m.add_command(label=label, command=lambda pid=p["id"]: self.compose(pid))
+        if not peers:
+            call_m.add_command(label="(nobody nearby yet)", state="disabled")
+            msg_m.add_command(label="(nobody nearby yet)", state="disabled")
+        m.add_cascade(label="Call", menu=call_m)
+        m.add_cascade(label="Message", menu=msg_m)
+        m.add_command(label="Buddies & inbox…", command=lambda: self.open_window("buddies"))
+        self.var_dnd.set(self.cfg["dnd"])
+        m.add_checkbutton(label="Do not disturb", variable=self.var_dnd, command=lambda: self.set_dnd(self.var_dnd.get()))
+        m.add_separator()
+
+        due = len(self.bc.items)
+        m.add_command(label="Basecamp tasks" + (f" ({due})" if due else "") + "…",
+                      command=lambda: self.open_window("tasks"))
+        m.add_separator()
+        self.var_wander.set(st["wander"])
+        m.add_checkbutton(label="Wander around", variable=self.var_wander, command=self.toggle_wander)
+        m.add_command(label="Settings…", command=lambda: self.open_window("settings"))
+        m.add_command(label="Check for updates", command=lambda: self.check_updates(manual=True))
+        m.add_command(label="Quit", command=self.quit)
+        try:
+            m.tk_popup(e.x_root, e.y_root)
+        finally:
+            m.grab_release()
+
+    def open_window(self, name):
+        w = self.windows.get(name)
+        if w and w.alive():
+            w.top.deiconify()
+            w.top.lift()
+            w.top.focus_force()
+            return w
+        cls = {"timers": W.TimersWindow, "buddies": W.BuddiesWindow, "tasks": W.TasksWindow,
+               "settings": W.SettingsWindow, "status": W.StatusWindow}[name]
+        self.windows[name] = w = cls(self)
+        if name == "tasks" and self.bc.connected:
+            self.bc.refresh()
+        return w
+
+    def toggle_wander(self):
+        self.st["wander"] = self.var_wander.get()
+        if not self.st["wander"] and self.action == "walk":
+            self.set_action("idle", 3)
+
+    def rename(self):
+        name = W.ask_text(self, "Rename", "Pet name:", initial=self.st["name"])
+        if name and name.strip():
+            self.st["name"] = name.strip()[:16]
+            self.say(f"I'm {self.st['name']}!")
+            self.save()
+
+    def save(self):
+        self.st["x"] = int(self.x)
+        self.st["wall"] = time.time()
+        try:
+            write_json(self.state_path, self.st)
+        except Exception:
+            self._on_error(*sys.exc_info())
+        self.last_save = time.monotonic()
+
+    def quit(self):
+        self.save()
+        self.sound.stop()
+        if self.net:
+            self.net.stop()
+        self.root.destroy()
+
+
+def main():
+    data = None
+    if FAST > 1:
+        data = data_dir() / "fast"
+    if not single_instance("Local\\BlipDesktopPet" + ("Fast" if FAST > 1 else "")):
+        return
+    app = App(data)
+    app.root.mainloop()
