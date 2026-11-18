@@ -1,5 +1,4 @@
 """Blip - the pet window and everything it does."""
-import ctypes
 import math
 import queue
 import random
@@ -24,68 +23,27 @@ from . import updater as upd
 from . import windows as W
 from .menu import PopMenu
 from .tray import Tray
+from . import voice
+from . import plat
+from .plat import work_area_at
+
+
+def startup_args():
+    if frozen():
+        return [sys.executable]
+    exe = Path(sys.executable)
+    if plat.WIN and exe.with_name("pythonw.exe").exists():
+        exe = exe.with_name("pythonw.exe")
+    return [str(exe), str(Path(__file__).resolve().parent.parent / "blip_main.pyw")]
 
 FAST = 60.0 if "--fast" in sys.argv else 1.0
 HOUR = 3600.0
 EGG_TIME = 90
 BABY_END = 12 * HOUR
 CHILD_END = 48 * HOUR
-RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
-RUN_NAME = "BlipPet"
 STAGE_NAMES = {"egg": "Egg", "baby": "Baby", "child": "Kid", "adult": "Grown-up"}
 CALL_RING_SECS = 60
 ANSWERS = {"coming": "On my way!", "2min": "Give me 2 minutes.", "busy": "Busy right now - I'll get back to you."}
-
-
-# ---------------------------------------------------------------- windows helpers
-if sys.platform == "win32":
-    from ctypes import wintypes
-
-    class _MONITORINFO(ctypes.Structure):
-        _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
-                    ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
-
-    _user32 = ctypes.windll.user32
-    _user32.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
-    _user32.MonitorFromPoint.restype = wintypes.HMONITOR
-    _user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(_MONITORINFO)]
-
-
-def work_area_at(root, x, y):
-    """Work area (l, t, r, b) of the monitor nearest to screen point x, y."""
-    if sys.platform == "win32":
-        try:
-            hmon = _user32.MonitorFromPoint(wintypes.POINT(int(x), int(y)), 2)
-            mi = _MONITORINFO()
-            mi.cbSize = ctypes.sizeof(mi)
-            if _user32.GetMonitorInfoW(hmon, ctypes.byref(mi)):
-                r = mi.rcWork
-                return r.left, r.top, r.right, r.bottom
-        except Exception:
-            pass
-    return 0, 0, root.winfo_screenwidth(), root.winfo_screenheight() - 40
-
-
-_MUTEX = None
-
-
-def single_instance(name):
-    global _MUTEX
-    if sys.platform != "win32":
-        return True
-    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    k32.CreateMutexW.restype = ctypes.c_void_p
-    _MUTEX = k32.CreateMutexW(None, False, name)
-    return ctypes.get_last_error() != 183  # ERROR_ALREADY_EXISTS
-
-
-def startup_command():
-    if frozen():
-        return f'"{sys.executable}"'
-    pyw = Path(sys.executable).with_name("pythonw.exe")
-    if not pyw.exists():
-        pyw = Path(sys.executable)
-    return f'"{pyw}" "{(Path(__file__).resolve().parent.parent / "blip_main.pyw")}"'
 
 
 # ---------------------------------------------------------------- pet state
@@ -166,11 +124,7 @@ def fmt_age(sec):
 # ---------------------------------------------------------------- app
 class App:
     def __init__(self, data=None, start_services=True):
-        if sys.platform == "win32":
-            try:
-                ctypes.windll.shcore.SetProcessDpiAwareness(1)
-            except Exception:
-                pass
+        plat.dpi_aware()
         self.data = Path(data) if data else data_dir()
         self.cfg = Config(self.data / "config.json")
         self.root = root = tk.Tk()
@@ -179,7 +133,7 @@ class App:
         kit.init(root)
         W.style(root)
         self.menu = None
-        S = self.S = root.winfo_fpixels("1i") / 96.0
+        S = self.S = plat.ui_scale(root)
         self.P = max(3, round(4 * S))
         self.bub_h = round(48 * S)
         self.W = max(GW * self.P, round(200 * S))
@@ -187,19 +141,21 @@ class App:
         self.H = self.bub_h + GH * self.P
         root.overrideredirect(True)
         root.attributes("-topmost", True)
-        if sys.platform == "win32":
-            root.attributes("-transparentcolor", KEY)
-        root.configure(bg=KEY)
+        plat.make_transparent(root)
+        if plat.MAC:      # Dock icon click brings the pet back; app menu > Settings
+            root.createcommand("::tk::mac::ReopenApplication", self.reopen)
+            root.createcommand("::tk::mac::ShowPreferences", lambda: self.open_window("settings"))
+            root.createcommand("::tk::mac::Quit", self.quit)
         self.cv = tk.Canvas(root, width=self.W, height=self.H, bg=KEY, highlightthickness=0, bd=0)
         self.cv.pack()
-        self.font = ("Segoe UI", 9)
+        self.font = kit.F["small"]
 
         self.state_path = self.data / "state.json"
         self.st = load_state(self.state_path)
         self.surprise_look()
         self.timers = Timers(self.data / "timers.json")
         self.inbox = read_json(self.data / "inbox.json", [])
-        self.sound = Sound(self.data, lambda: self.cfg["sound"])
+        self.sound = Sound(self.data, lambda: self.cfg["sound"], lambda: self.cfg.get("volume", 60))
         self.cards = CardStack(self)
         self.events = queue.Queue()
         self.bc = Basecamp(self.cfg, self.post)
@@ -209,6 +165,7 @@ class App:
         self.net_error = None
         self.calls_in, self.calls_out = {}, {}
         self.alerts = {}
+        self.voice = self.voice_call = None
         self.windows = {}
         self.bc_snooze_until = 0.0
         self.last_bc_nag = time.monotonic()
@@ -271,6 +228,7 @@ class App:
         root.after(100, self.pump)
         self.tray = None
         self.temp_shown = False
+        self.voice_ok = voice.available()
         if not self.st.get("visible", True):
             self._set_visible(False)
         if start_services:
@@ -385,6 +343,8 @@ class App:
             return "held"
         if a == "ring":
             return "alert"
+        if self.voice and self.voice.level_out > 0.12 and self.frame % 2:
+            return "eat"
         if st["asleep"]:
             return "sleep"
         if st["sick"]:
@@ -900,8 +860,7 @@ class App:
         win = tk.Toplevel(self.root)
         win.overrideredirect(True)
         win.attributes("-topmost", True)
-        if sys.platform == "win32":
-            win.attributes("-transparentcolor", KEY)
+        plat.make_transparent(win)
         c = tk.Canvas(win, width=w, height=h, bg=KEY, highlightthickness=0, bd=0, cursor="hand2")
         c.pack()
         for y, row in enumerate(POOP):
@@ -989,7 +948,7 @@ class App:
     def profile(self):
         return {"name": self.cfg["display_name"], "status": "busy" if self.cfg["dnd"] else "available",
                 "stage": self.st["stage"], "palette": self.palette(), "species": self.species(),
-                "ver": __version__}
+                "voice": bool(getattr(self, "voice_ok", False)), "ver": __version__}
 
     def refresh_icon(self):
         """Window icons show the current pet."""
@@ -1089,7 +1048,11 @@ class App:
             if cid in self.calls_in:
                 self.cards.close(f"in:{cid}", why="cancel")
         elif kind == "call_reply":
-            self.call_answered(src, name, str(body.get("call_id", "")), str(body.get("text", ""))[:300])
+            self.call_answered(src, name, str(body.get("call_id", "")), str(body.get("text", ""))[:300],
+                               body.get("voice"))
+        elif kind == "voice_end":
+            if self.voice_call and self.voice_call["cid"] == str(body.get("call_id", "")):
+                self.end_voice(notify=False, why="They hung up")
         elif kind == "msg":
             self.incoming_msg(src, name, str(body.get("text", ""))[:500])
 
@@ -1141,6 +1104,10 @@ class App:
 
         def answer(code):
             def go():
+                if code == "voice":
+                    self.calls_in.pop(cid, None)
+                    self.answer_voice(src, name, cid)
+                    return
                 text = ANSWERS.get(code)
                 if code == "custom":
                     text = W.ask_text(self, f"Reply to {name}", "Your reply:")
@@ -1161,15 +1128,27 @@ class App:
                                 kind="call", icon="phone", key=f"missed:{src}")
 
         self.start_alert(key, "ring", dash=True)
-        self.cards.show("Incoming call", f"{name} is calling you!",
-                        [("Coming", answer("coming")), ("2 min", answer("2min")), ("Busy", answer("busy")),
-                         ("Reply...", answer("custom"))],
+        buttons = [("Coming", answer("coming")), ("2 min", answer("2min")), ("Busy", answer("busy")),
+                   ("Reply...", answer("custom"))]
+        if self.can_voice(src):
+            buttons.insert(0, ("Talk", answer("voice")))
+        self.cards.show("Incoming call", f"{name} is calling you!", buttons,
                         kind="call", icon="phone", key=key, timeout=CALL_RING_SECS, on_close=closed)
 
-    def call_answered(self, src, name, cid, text):
+    def call_answered(self, src, name, cid, text, voice_info=None):
         if self.calls_out.pop(cid, None) is None:
             return
         self.cards.close(f"out:{cid}")
+        if isinstance(voice_info, dict) and self.voice_ok and not self.voice:
+            p = self.net.peer(src) if self.net else None
+            try:
+                port, nonce = int(voice_info["port"]), str(voice_info["nonce"])
+                bytes.fromhex(nonce)
+            except (KeyError, TypeError, ValueError):
+                port = None
+            if p and p.get("ip") and port:
+                self.start_voice(src, name, cid, 0, nonce, (p["ip"], port))
+                return
         self.log_inbox("in", src, name, text)
         self.sound.play("ding")
         self.cards.show(name, text or "answered", [("OK", lambda: None), ("Message", lambda: self.compose(src, name=name))],
@@ -1177,6 +1156,77 @@ class App:
         if self.hatched():
             self.happy_until = time.monotonic() + 2
             self.jump()
+
+    # ------------------------------------------------ voice calls
+    def can_voice(self, pid):
+        p = self.net.peer(pid) if self.net else None
+        return bool(self.voice_ok and not self.voice and p and p.get("voice") and p.get("via") == "lan")
+
+    def answer_voice(self, src, name, cid):
+        nonce = voice.new_nonce()
+        sess = self.start_voice(src, name, cid, 1, nonce, None)
+        if sess:
+            self.net.send(src, "call_reply", {"call_id": cid, "text": "Talking",
+                                              "voice": {"port": sess.port, "nonce": nonce}})
+
+    def start_voice(self, pid, name, cid, role, nonce, peer_addr):
+        keys = voice.session_keys(self.net.key, cid, nonce)
+        sess = voice.VoiceSession(keys, role, peer_addr, on_end=lambda why: self.post(self._voice_lost, cid))
+        try:
+            sess.start()
+        except OSError as e:
+            self.cards.show("Voice", f"Couldn't start the call audio: {e}", [("OK", lambda: None)], kind="call",
+                            icon="phone", timeout=20)
+            return None
+        self.voice, self.voice_call = sess, {"cid": cid, "peer": pid, "name": name}
+        self.log_inbox("in" if role else "out", pid, name, "\U0001F3A7 voice call")
+        if self.hatched():
+            self.happy_until = time.monotonic() + 2
+        note = "\nCouldn't open your microphone: " + sess.error if sess.error else \
+            "\nTip: a headset stops echo."
+
+        def mute():
+            if self.voice:
+                self.voice.muted = not self.voice.muted
+                self._voice_paint()
+            return True
+        self.cards.show(f"Talking with {name}", "00:00" + note, [("Hang up", self.end_voice), ("Mute", mute)],
+                        kind="call", icon="phone", key="voice",
+                        on_close=lambda why: why == "x" and self.end_voice())
+        self._voice_note = note
+        self._voice_tick(sess)
+        return sess
+
+    def _voice_paint(self):
+        c = self.cards.get("voice")
+        if c and self.voice:
+            t = int(self.voice.seconds())
+            state = "  \u00b7  muted" if self.voice.muted else ""
+            if not self.voice.received and t > 4:
+                state += "  \u00b7  connecting\u2026"
+            c.set_body(f"{t // 60:02d}:{t % 60:02d}{state}{self._voice_note}")
+
+    def _voice_tick(self, sess):
+        if self.voice is not sess:
+            return
+        self._voice_paint()
+        self.root.after(1000, lambda: self._voice_tick(sess))
+
+    def _voice_lost(self, cid):
+        if self.voice_call and self.voice_call["cid"] == cid:
+            self.end_voice(notify=True, why="Lost the connection")
+
+    def end_voice(self, notify=True, why=None):
+        sess, info = self.voice, self.voice_call
+        self.voice = self.voice_call = None
+        if sess:
+            sess.stop()
+        if info and notify and self.net:
+            self.net.send(info["peer"], "voice_end", {"call_id": info["cid"]})
+        self.cards.close("voice")
+        if info:
+            secs = int(sess.seconds()) if sess else 0
+            self.board(why or f"Call ended {secs // 60}:{secs % 60:02d}", 4)
 
     def incoming_msg(self, src, name, text):
         self.log_inbox("in", src, name, text)
@@ -1255,6 +1305,26 @@ class App:
                         [("Show all", lambda: self.open_window("tasks")), ("Snooze 1h", snooze), ("OK", lambda: None)],
                         kind="task", icon="task", key="bc")
 
+    def connect_basecamp(self):
+        """One click: open the Basecamp approval page in the browser and finish in the background."""
+        if not all(self.bc.client_creds()):
+            self.open_window("settings", "basecamp")
+            return
+        self.board("Opening Basecamp", 4)
+
+        def done(ok, msg, accts):
+            self.cards.show("Basecamp", msg + (". Blip will remind you about what's due." if ok else ""),
+                            [("Show my tasks", lambda: self.open_window("tasks")), ("OK", lambda: None)] if ok
+                            else [("OK", lambda: None)], kind="task", icon="task", timeout=30)
+            for name in ("tasks", "settings"):
+                w = self.windows.get(name)
+                if w and w.alive():
+                    for attr in ("sig", "bc_state"):
+                        if hasattr(w, attr):
+                            setattr(w, attr, None)
+                    w.refresh()
+        self.bc.connect_oauth(done)
+
     def complete_task(self, item):
         if item.get("type") not in ("todo", "Todo", None):
             self.board("Only to-dos")
@@ -1329,28 +1399,22 @@ class App:
 
     # ------------------------------------------------ startup registry
     def startup_enabled(self):
-        if sys.platform != "win32":
-            return False
-        try:
-            import winreg
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as k:
-                winreg.QueryValueEx(k, RUN_NAME)
-            return True
-        except OSError:
-            return False
+        return plat.startup_enabled()
 
     def set_startup(self, on):
-        if sys.platform != "win32" or FAST > 1:
+        if FAST > 1:
             return
-        import winreg
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as k:
-            if on:
-                winreg.SetValueEx(k, RUN_NAME, 0, winreg.REG_SZ, startup_command())
-            else:
-                try:
-                    winreg.DeleteValue(k, RUN_NAME)
-                except OSError:
-                    pass
+        try:
+            plat.set_startup(on, startup_args())
+        except OSError as e:
+            self.board("Couldn't change", 3)
+            self._on_error(type(e), e, e.__traceback__)
+
+    def reopen(self):
+        """macOS: the Dock icon was clicked."""
+        if not self.st.get("visible", True):
+            self.toggle_visible()
+        self.root.after(50, self.menu_at_cursor)
 
     # ------------------------------------------------ drawing
     def draw(self):
@@ -1580,7 +1644,8 @@ class App:
             {"label": "Message", "icon": "mail", "submenu": lambda: people_menu("msg")},
             {"label": "Buddies & inbox", "icon": "people", "command": lambda: self.open_window("buddies")},
             {"label": "Basecamp tasks", "icon": "task", "command": lambda: self.open_window("tasks"),
-             "hint": str(due or "")},
+             "hint": str(due or "")} if self.bc.connected else
+            {"label": "Connect Basecamp", "icon": "task", "command": self.connect_basecamp},
             {"label": "Do not disturb", "icon": "dnd", "check": bool(self.cfg["dnd"]),
              "command": lambda: self.set_dnd(not self.cfg["dnd"])},
             {"sep": True},
@@ -1641,6 +1706,8 @@ class App:
         self.last_save = time.monotonic()
 
     def quit(self):
+        if self.voice:
+            self.end_voice()
         self.save()
         self.sound.stop()
         if self.net:
@@ -1688,7 +1755,7 @@ def main():
     data = None
     if FAST > 1:
         data = data_dir() / "fast"
-    if not single_instance("Local\\BlipDesktopPet" + ("Fast" if FAST > 1 else "")):
+    if not plat.single_instance("BlipDesktopPet" + ("Fast" if FAST > 1 else "")):
         return
     app = App(data)
     app.root.mainloop()

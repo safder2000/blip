@@ -35,25 +35,36 @@ def _get(url, accept="application/vnd.github+json", timeout=30):
         return r.read()
 
 
-def pick_assets(release):
-    exe = sha = None
+MAC_ASSET = "Blip-mac-arm64.zip"
+
+
+def pick_assets(release, mac=None):
+    """(download, checksum) assets for this platform."""
+    mac = sys.platform == "darwin" if mac is None else mac
+    item = sha = None
     for a in release.get("assets", []):
-        n = a.get("name", "")
-        if n.lower().startswith("blipsetup") and n.lower().endswith(".exe"):
-            exe = a
-        elif n.lower().endswith(".exe.sha256"):
-            sha = a
-    return exe, sha
+        n = a.get("name", "").lower()
+        if mac:
+            if n == MAC_ASSET.lower():
+                item = a
+            elif n == MAC_ASSET.lower() + ".sha256":
+                sha = a
+        else:
+            if n.startswith("blipsetup") and n.endswith(".exe"):
+                item = a
+            elif n.endswith(".exe.sha256"):
+                sha = a
+    return item, sha
 
 
 def latest():
     """{'version', 'exe_url', 'exe_name', 'sha_url', 'notes', 'page'} or None."""
     rel = json.loads(_get(API))
-    exe, sha = pick_assets(rel)
-    if not exe:
+    item, sha = pick_assets(rel)
+    if not item:
         return None
-    return {"version": rel.get("tag_name", "").lstrip("v"), "exe_url": exe["browser_download_url"],
-            "exe_name": exe["name"], "sha_url": sha["browser_download_url"] if sha else None,
+    return {"version": rel.get("tag_name", "").lstrip("v"), "exe_url": item["browser_download_url"],
+            "exe_name": item["name"], "sha_url": sha["browser_download_url"] if sha else None,
             "notes": rel.get("body") or "", "page": rel.get("html_url", "")}
 
 
@@ -72,10 +83,35 @@ def download(info, folder=None):
     return path
 
 
+MAC_SWAP = """#!/bin/bash
+# Blip updater: wait for the old app to quit, swap in the new one, start it.
+OLD_PID="$1"; NEW_ZIP="$2"; APP="$3"
+for i in $(seq 1 60); do kill -0 "$OLD_PID" 2>/dev/null || break; sleep 0.5; done
+WORK="$(mktemp -d)"
+/usr/bin/ditto -x -k "$NEW_ZIP" "$WORK" || exit 1
+[ -d "$WORK/Blip.app" ] || exit 1
+rm -rf "$APP.old"
+mv "$APP" "$APP.old" && mv "$WORK/Blip.app" "$APP" && rm -rf "$APP.old"
+/usr/bin/xattr -dr com.apple.quarantine "$APP" 2>/dev/null
+/usr/bin/open "$APP"
+rm -rf "$WORK"
+"""
+
+
 def launch_installer(path):
-    flags = 0
-    if sys.platform == "win32":
-        flags = 0x00000008 | 0x00000200   # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    """Start the update; the caller quits Blip right after."""
+    if sys.platform == "darwin":
+        from .plat import app_bundle
+        bundle = app_bundle()
+        if not bundle:
+            raise RuntimeError("not running as Blip.app")
+        script = Path(path).with_name("blip-swap.sh")
+        script.write_text(MAC_SWAP, encoding="utf-8")
+        subprocess.Popen(["/bin/bash", str(script), str(os.getpid()), str(path), str(bundle)],
+                         start_new_session=True, close_fds=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return
+    flags = 0x00000008 | 0x00000200   # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
     subprocess.Popen([str(path), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"],
                      creationflags=flags, close_fds=True, cwd=os.path.dirname(str(path)))
 

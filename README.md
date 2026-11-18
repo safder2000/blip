@@ -7,6 +7,8 @@ calls and messages between colleagues' pets, timers, stopwatches, alarms, and Ba
 
 ## Install
 
+### Windows
+
 Download **`BlipSetup-x.y.z.exe`** from the [latest release](https://github.com/safder2000/blip/releases/latest) and run it.
 No admin rights needed. It installs to `%LOCALAPPDATA%\Programs\Blip` and starts Blip.
 
@@ -16,6 +18,20 @@ No admin rights needed. It installs to `%LOCALAPPDATA%\Programs\Blip` and starts
 - Blip updates itself: it checks GitHub every few hours, downloads the new setup, verifies its SHA-256,
   installs silently and restarts. (Settings → *Install updates automatically*.)
 
+### Mac (Apple Silicon)
+
+Open Terminal and paste:
+
+```
+curl -fsSL https://raw.githubusercontent.com/safder2000/blip/main/install-mac.sh | bash
+```
+
+That downloads the latest `Blip-mac-arm64.zip`, checks its SHA-256, installs Blip.app into Applications and starts it.
+No Apple developer account or licence is needed. Installing this way avoids the "unidentified developer" warning
+you'd get from a browser download. macOS asks once for the local network (finding colleagues) and the
+microphone (voice calls). Blip.app updates itself like the Windows version. Click Blip's Dock icon to bring the pet
+and its menu back.
+
 ## Using it
 
 - **Left-click** pat · **drag** pick up · **right-click** for the menu (care buttons, timers, calls, settings).
@@ -23,7 +39,8 @@ No admin rights needed. It installs to `%LOCALAPPDATA%\Programs\Blip` and starts
 - Pets don't talk like people: they chirp in their own language ("mew?", "arf!", "beep~") with a little
   icon for what they want. Real information ("Sent!", "DND on", "Timer 25:00") shows on a signboard,
   and calls, messages, alarms and Basecamp reminders pop up as cards.
-- Sounds are off by default (Settings → General → Sounds).
+- Sounds are off by default. Settings → General → Sounds has a volume slider that plays a sample as you set it.
+  Every sound is synthesised by the code itself, so no audio files ship with Blip.
 - **Settings → Pet** to pick a look (Blip, Kitty, Bunny, Bear, Pup, Chick, Bot) and a colour.
   The first time Blip starts it asks your name and lets you pick your pet; colleagues see both.
 - Blip also lives in the **system tray** (the ^ next to the clock): click it for the menu,
@@ -39,6 +56,8 @@ so if one PC can reach another floor, everyone gets introduced.
 - Right-click → **Call ▸ name**: their pet runs to the middle of their screen and rings.
   They answer with *Coming*, *2 min*, *Busy* or a custom reply, and your pet shows it.
 - Right-click → **Message ▸ name** for a short note. History is in **Buddies & inbox**.
+- **Voice calls:** when both PCs have a microphone, the ringing card has a **Talk** button. Audio goes straight
+  between the two computers over the office network, encrypted with the group key. Use a headset to avoid echo.
 - **Do not disturb** silences calls (callers get an automatic "busy").
 - By default everyone in the office who has Blip can see each other. Turn on **Settings → Office →
   Private group** and share a group password to limit it to your team. Every packet is signed with it.

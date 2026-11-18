@@ -1,5 +1,4 @@
 """Paths, settings and small JSON persistence helpers."""
-import getpass
 import json
 import os
 import shutil
@@ -13,7 +12,10 @@ def data_dir():
     if override:
         d = Path(override)
     else:
-        d = Path(os.environ.get("APPDATA") or Path.home()) / "Blip"
+        if sys.platform == "darwin":
+            d = Path.home() / "Library" / "Application Support" / "Blip"
+        else:
+            d = Path(os.environ.get("APPDATA") or Path.home()) / "Blip"
         old = d.parent / "pcpet"
         if not d.exists() and (old / "state.json").exists():   # keep a pet from the first prototype
             d.mkdir(parents=True, exist_ok=True)
@@ -38,10 +40,8 @@ def write_json(path, data):
 
 
 def _default_name():
-    try:
-        return getpass.getuser().split("\\")[-1][:20] or "Someone"
-    except Exception:
-        return "Someone"
+    from .plat import user_name
+    return user_name()[:20] or "Someone"
 
 
 DEFAULTS = {
@@ -53,6 +53,7 @@ DEFAULTS = {
     "relay": "",                   # optional "host:port" of a relay (blip.relay) when broadcast is blocked
     "manual_peers": "",            # optional comma-separated IPs to say hello to directly
     "sound": False,                # quiet by default; Settings > General > Sounds
+    "volume": 60,
     "auto_update": True,
     "bc_token": "",
     "bc_refresh": "",

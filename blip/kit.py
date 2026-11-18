@@ -29,6 +29,11 @@ F = {}
 def init(root):
     """Pick fonts once per Tk root."""
     fams = set(tkfont.families(root))
+    if sys.platform == "darwin":        # macOS sizes are in points at 72 dpi: a little bigger
+        body = semi = "Helvetica Neue"
+        F.update(body=(body, 13), small=(body, 12), tiny=(body, 11), bold=(semi, 13, "bold"),
+                 h2=(semi, 15, "bold"), h1=(semi, 18, "bold"), mono=("Menlo", 12))
+        return
     body = "Segoe UI Variable Text" if "Segoe UI Variable Text" in fams else "Segoe UI"
     semi = "Segoe UI Variable Text Semibold" if "Segoe UI Variable Text Semibold" in fams else (
         "Segoe UI Semibold" if "Segoe UI Semibold" in fams else body)
@@ -37,7 +42,8 @@ def init(root):
 
 
 def scale(w):
-    return w.winfo_fpixels("1i") / 96.0
+    from .plat import ui_scale
+    return ui_scale(w)
 
 
 def px_of(w, base=2):
@@ -198,6 +204,90 @@ class Toggle(tk.Canvas):
         k = h - 2 * m
         x0 = w - m - k if self.value else m
         pixel_box(self, x0, m, x0 + k, m + k, p, "#ffffff")
+
+
+class VolumeSlider(tk.Canvas):
+    """Pixel 'signal bars' that light up from mint to pink. Click or drag to set the volume;
+    a sample chirp plays at that level when you let go. Click the speaker to mute."""
+    BAR_COLORS = ["#7ad9b0", "#8cd5a0", "#a6d08c", "#c2ca78", "#dcc36a", "#f0b964", "#f6a26c", "#f68a7e",
+                  "#f07592", "#e868a6"]
+
+    def __init__(self, parent, value=60, command=None, preview=None, enabled=True):
+        S = scale(parent)
+        self.n = 10
+        self.bw, self.gap = round(12 * S), round(5 * S)
+        self.x0 = round(34 * S)
+        self.h = round(36 * S)
+        self.w = self.x0 + self.n * (self.bw + self.gap) + round(48 * S)
+        super().__init__(parent, width=self.w, height=self.h, bg=bg_of(parent), highlightthickness=0, bd=0,
+                         cursor="hand2")
+        self.value = int(value)
+        self.last_on = self.value or 60
+        self.command, self.preview, self.enabled = command, preview, enabled
+        self.bind("<Button-1>", self._press)
+        self.bind("<B1-Motion>", self._drag)
+        self.bind("<ButtonRelease-1>", self._release)
+        self.draw()
+
+    def set_enabled(self, on):
+        self.enabled = on
+        self.draw()
+
+    def _level_at(self, x):
+        if x < self.x0 - round(4 * scale(self)):
+            return None   # the speaker
+        return max(0, min(self.n, int((x - self.x0) // (self.bw + self.gap)) + 1))
+
+    def _set(self, value):
+        if value != self.value:
+            self.value = value
+            if value:
+                self.last_on = value
+            self.draw()
+            if self.command:
+                self.command(value)
+
+    def _press(self, e):
+        lvl = self._level_at(e.x)
+        if lvl is None:
+            self._set(0 if self.value else self.last_on)
+        else:
+            self._set(lvl * 10)
+
+    def _drag(self, e):
+        lvl = self._level_at(e.x)
+        if lvl is not None:
+            self._set(lvl * 10)
+
+    def _release(self, e):
+        if self.preview and self.value and self.enabled:
+            self.preview(self.value)
+
+    def draw(self):
+        self.delete("all")
+        S = scale(self)
+        p = px_of(self, 2)
+        lvl = self.value // 10
+        on = self.enabled
+        ink = INK if on else "#b9b3c8"
+        sy = (self.h - 7 * p) / 2
+        draw_text(self, 0, sy, ICON["speaker"], p, ink)
+        if lvl == 0:
+            draw_text(self, 6 * p, sy + p, "x", max(1, p // 2 + 1), DANGER if on else ink)
+        else:
+            for i in range(min(3, 1 + lvl // 4)):
+                x = 6 * p + i * 2 * p
+                hh = (2 + 2 * i) * p
+                self.create_rectangle(x, self.h / 2 - hh / 2, x + p, self.h / 2 + hh / 2, fill=ink, width=0)
+        for i in range(self.n):
+            x = self.x0 + i * (self.bw + self.gap)
+            bh = round(8 * S + (self.h - 10 * S) * (i + 1) / self.n)
+            lit = i < lvl
+            col = self.BAR_COLORS[i] if (lit and on) else ("#d9d3e6" if lit else "#ece8f4")
+            pixel_box(self, x, self.h - bh, x + self.bw, self.h, p, col)
+        pct = "Mute" if lvl == 0 else f"{self.value}%"
+        self.create_text(self.w - round(4 * S), self.h / 2, text=pct, anchor="e", font=F["small"],
+                         fill=MUTED if on else "#b9b3c8")
 
 
 class Field(tk.Frame):

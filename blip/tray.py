@@ -4,10 +4,14 @@ Left-click opens Blip's own menu next to the tray; right-click shows a short lis
 shortcuts. Runs on pystray's own thread; every action is handed to the UI thread.
 If pystray or Pillow isn't installed (running from source), Blip simply has no tray icon.
 """
+import sys
+
 try:
     import pystray
     from PIL import Image, ImageDraw
 except ImportError:      # optional when running from source
+    pystray = None
+if sys.platform == "darwin":   # pystray needs the main thread on macOS, which Tk owns; the Dock icon is used instead
     pystray = None
 
 from .sprites import PALETTES, build_pet

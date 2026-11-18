@@ -115,9 +115,12 @@ class UpdaterTests(unittest.TestCase):
     def test_pick_assets(self):
         rel = {"assets": [{"name": "notes.txt"}, {"name": "BlipSetup-1.0.0.exe.sha256"},
                           {"name": "BlipSetup-1.0.0.exe"}]}
-        exe, sha = updater.pick_assets(rel)
+        rel["assets"] += [{"name": "Blip-mac-arm64.zip"}, {"name": "Blip-mac-arm64.zip.sha256"}]
+        exe, sha = updater.pick_assets(rel, mac=False)
         self.assertEqual(exe["name"], "BlipSetup-1.0.0.exe")
         self.assertEqual(sha["name"], "BlipSetup-1.0.0.exe.sha256")
+        z, zsha = updater.pick_assets(rel, mac=True)
+        self.assertEqual((z["name"], zsha["name"]), ("Blip-mac-arm64.zip", "Blip-mac-arm64.zip.sha256"))
 
     def test_download_checks_hash(self):
         with tempfile.TemporaryDirectory() as d:

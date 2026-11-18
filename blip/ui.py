@@ -1,10 +1,10 @@
 """Pixel-styled pop-up cards (calls, messages, alarms, tasks) that stack above the pet."""
-import sys
 import tkinter as tk
 
+from . import kit
 from .sprites import COL, ICON, draw_text, text_width
 
-KEY = "#ff00fe"
+from .plat import KEY, make_transparent
 INK = COL["out"]
 PAPER = "#fffdf7"
 ACCENT = {
@@ -23,9 +23,7 @@ def make_overlay(root):
     t = tk.Toplevel(root)
     t.overrideredirect(True)
     t.attributes("-topmost", True)
-    if sys.platform == "win32":
-        t.attributes("-transparentcolor", KEY)
-    t.configure(bg=KEY)
+    make_transparent(t)
     return t
 
 
@@ -36,6 +34,7 @@ class PixelCard:
         A callback may return True to keep the card open."""
         self.stack, self.key, self.on_close = stack, key, on_close
         self.buttons = list(buttons)
+        self.body_id = None
         app = stack.app
         S = app.S
         p = self.p = max(2, round(2 * S))
@@ -63,8 +62,8 @@ class PixelCard:
         # body
         y = p + hh + pad
         if body:
-            t = cv.create_text(2 * p + pad, y, text=body, anchor="nw", width=W - 4 * p - 2 * pad,
-                               font=("Segoe UI", 10), fill=INK, tags="fg")
+            t = self.body_id = cv.create_text(2 * p + pad, y, text=body, anchor="nw", width=W - 4 * p - 2 * pad,
+                                              font=kit.F["body"], fill=INK, tags="fg")
             y = cv.bbox(t)[3] + pad
         # buttons, right-aligned, wrapping
         bh = 7 * p + 8 * p
@@ -116,6 +115,13 @@ class PixelCard:
         self.dragged = False
         if timeout:
             self.win.after(int(timeout * 1000), lambda: self.close("timeout"))
+
+    def set_body(self, text):
+        if self.body_id:
+            try:
+                self.cv.itemconfig(self.body_id, text=text)
+            except tk.TclError:
+                pass
 
     def _press(self, cb):
         keep = False

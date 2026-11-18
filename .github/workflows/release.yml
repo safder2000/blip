@@ -1,7 +1,9 @@
 name: release
 
-# Push a tag like v0.2.0 -> tests, Blip.exe (PyInstaller), BlipSetup-0.2.0.exe (Inno Setup),
-# and a GitHub release with the setup + its .sha256. Installed Blips pick it up on their own.
+# Push a tag like v0.5.0 ->
+#   Windows: tests, Blip.exe (PyInstaller), BlipSetup-0.5.0.exe (Inno Setup), GitHub release
+#   macOS:   tests, Blip.app (PyInstaller), Blip-mac-arm64.zip added to the same release
+# Every file gets a .sha256 next to it. Installed Blips pick the new version up on their own.
 on:
   push:
     tags: ["v*"]
@@ -20,7 +22,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install build tools
-        run: python -m pip install --upgrade pip pyinstaller==6.11.1 pystray==0.19.5 pillow==11.0.0
+        run: python -m pip install --upgrade pip pyinstaller==6.11.1 pystray==0.19.5 pillow==11.0.0 sounddevice==0.5.1
 
       - name: Stamp version
         shell: pwsh
@@ -58,3 +60,54 @@ jobs:
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
           "$hash  $name" | Out-File -FilePath "$exe.sha256" -Encoding ascii -NoNewline
           gh release create "${{ github.ref_name }}" $exe "$exe.sha256" --title "Blip $env:VERSION" --generate-notes
+
+  mac:
+    needs: build
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: python -m pip install --upgrade pip pyinstaller==6.11.1 pillow==11.0.0 sounddevice==0.5.1
+
+      - name: Stamp version
+        env:
+          BC_CLIENT_ID: ${{ secrets.BASECAMP_CLIENT_ID }}
+          BC_CLIENT_SECRET: ${{ secrets.BASECAMP_CLIENT_SECRET }}
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+          python packaging/stamp.py "$v"
+
+      - name: Tests
+        run: python -m unittest discover -s tests -t . -v
+
+      - name: Icon
+        run: |
+          python packaging/make_icon.py --iconset
+          iconutil -c icns assets/blip.iconset -o assets/blip.icns
+
+      - name: Build Blip.app
+        run: pyinstaller --noconfirm --clean packaging/blip_mac.spec
+
+      - name: Smoke test the app starts
+        run: |
+          ./dist/Blip.app/Contents/MacOS/Blip &
+          pid=$!
+          sleep 12
+          if ! kill -0 $pid 2>/dev/null; then echo "Blip.app exited early"; exit 1; fi
+          kill $pid
+          if [ -f "$HOME/Library/Application Support/Blip/error.log" ]; then cat "$HOME/Library/Application Support/Blip/error.log"; exit 1; fi
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          ditto -c -k --sequesterRsrc --keepParent Blip.app Blip-mac-arm64.zip
+          shasum -a 256 Blip-mac-arm64.zip > Blip-mac-arm64.zip.sha256
+          gh release upload "$GITHUB_REF_NAME" Blip-mac-arm64.zip Blip-mac-arm64.zip.sha256 --clobber

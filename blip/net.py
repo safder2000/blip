@@ -10,6 +10,7 @@ import hmac
 import ipaddress
 import json
 import socket
+import sys
 import threading
 import time
 import uuid
@@ -49,11 +50,12 @@ def check(key, d):
 
 def local_ips():
     ips = set()
-    try:
-        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
-            ips.add(info[4][0])
-    except OSError:
-        pass
+    if sys.platform != "darwin":    # on macOS this lookup can stall for seconds
+        try:
+            for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+                ips.add(info[4][0])
+        except OSError:
+            pass
     try:  # the address of the default route (connect() on UDP sends nothing)
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("10.255.255.255", 1))
@@ -204,7 +206,7 @@ class Net:
                 p.update(name=str(body.get("name", "?"))[:24], status=body.get("status", "available"),
                          stage=body.get("stage"), palette=body.get("palette"), ver=body.get("ver"),
                          port=int(body.get("port") or TCP_PORT), seen=time.time(),
-                         species=body.get("species"))
+                         species=body.get("species"), voice=bool(body.get("voice")))
             self._learn(body.get("peers"))
             if new and d.get("to") is None:
                 reply = self._hello(to=src)

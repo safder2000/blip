@@ -376,6 +376,8 @@ _EXTRA = {
     "chevron": "00 08 04 02 04 08 00", "plus": "00 04 04 1F 04 04 00", "trash": "04 1F 00 1F 15 15 0E",
     "pause": "1B 1B 1B 1B 1B 1B 00", "playtri": "08 0C 0E 0F 0E 0C 08", "reset": "0D 13 17 10 10 11 0E",
     "x": "11 0A 04 0A 11 00 00", "open": "0F 03 05 09 10 00 00", "user": "0E 0E 0E 00 1F 1F 1F",
+    "speaker": "02 06 1E 1E 1E 06 02", "mic": "0E 0E 0E 0E 11 0E 04", "micoff": "1E 0F 0E 06 13 0E 05",
+    "hangup": "00 0E 1F 1B 11 00 00",
 }
 for _i, (_n, _v) in enumerate(_EXTRA.items()):
     _F[chr(0xE000 + _i)] = _v

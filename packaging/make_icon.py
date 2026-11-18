@@ -6,7 +6,7 @@ from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from blip.sprites import GH, GW, build_pet  # noqa: E402
+from blip.sprites import build_pet  # noqa: E402
 
 
 def render(size):
@@ -26,7 +26,20 @@ def render(size):
     return img
 
 
+def iconset():
+    """PNG set for macOS: iconutil -c icns assets/blip.iconset"""
+    d = ROOT / "assets" / "blip.iconset"
+    d.mkdir(parents=True, exist_ok=True)
+    for size in (16, 32, 128, 256, 512):
+        render(size).save(d / f"icon_{size}x{size}.png")
+        render(size * 2).save(d / f"icon_{size}x{size}@2x.png")
+    print("wrote", d)
+
+
 def main():
+    if "--iconset" in sys.argv:
+        iconset()
+        return
     out = ROOT / "assets"
     out.mkdir(exist_ok=True)
     sizes = [16, 24, 32, 48, 64, 128, 256]

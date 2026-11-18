@@ -6,7 +6,7 @@ import tkinter as tk
 import webbrowser
 from tkinter import ttk
 
-from . import __version__, kit
+from . import __version__, kit, plat
 from .kit import (ACCENT, ACCENT_SOFT, BG, DANGER, INK, LINE, MUTED, OK, SURFACE, WARN, Avatar, Btn, Card, Chips,
                   Field, SettingRow, Scroller, Toggle, label, muted)
 from .net import DEFAULT_GROUP, local_ips
@@ -81,13 +81,17 @@ def section(parent, text, pady=(14, 6)):
     return f
 
 
-def empty_state(parent, title, text, btn=None):
+def empty_state(parent, title, text, btn=None, link=None):
     f = tk.Frame(parent, bg=kit.bg_of(parent))
     f.pack(fill="x", pady=S_(parent, 18))
     label(f, title, "bold").pack()
     muted(f, text, wraplength=S_(parent, 340), justify="center").pack(pady=(S_(parent, 4), 0))
     if btn:
-        Btn(f, btn[0], btn[1], kind="soft", small=True).pack(pady=(S_(parent, 10), 0))
+        kind = btn[2] if len(btn) > 2 else "soft"
+        Btn(f, btn[0], btn[1], kind=kind, small=kind != "primary", icon=btn[3] if len(btn) > 3 else None).pack(
+            pady=(S_(parent, 12), 0))
+    if link:
+        Btn(f, link[0], link[1], kind="ghost", small=True).pack(pady=(S_(parent, 4), 0))
     return f
 
 
@@ -283,13 +287,23 @@ class SettingsWindow(kit.Window):
         r.pack(fill="x")
         Field(r.right, cfg["display_name"], width=16, on_commit=self._set_name).pack()
         kit.hline(b)
-        self._toggle_row(b, "Sounds", "Chirps for calls, messages, timers and alarms.", cfg["sound"],
-                         lambda v: self._cfg(sound=v))
+        r = SettingRow(b, "Sounds", "Chirps for calls, messages, timers and alarms.")
+        r.pack(fill="x")
+        self.vol = kit.VolumeSlider(b, cfg.get("volume", 60), lambda v: self._cfg(volume=v), app.sound.preview,
+                                    enabled=cfg["sound"])
+
+        def sounds(on):
+            self._cfg(sound=on)
+            self.vol.set_enabled(on)
+            if on:
+                app.sound.preview(cfg.get("volume", 60))
+        Toggle(r.right, cfg["sound"], sounds).pack()
+        self.vol.pack(anchor="w", pady=(round(10 * S), 0))
         kit.hline(b)
-        self._toggle_row(b, "Start with Windows", "Blip appears when you sign in.", app.startup_enabled(),
-                         app.set_startup)
+        self._toggle_row(b, "Open at login" if plat.MAC else "Start with Windows", "Blip appears when you sign in.",
+                         app.startup_enabled(), app.set_startup)
         kit.hline(b)
-        self._toggle_row(b, "Wander around", "Let your pet walk along the taskbar.", app.st["wander"], app.set_wander)
+        self._toggle_row(b, "Wander around", "Let your pet walk along the bottom of the screen.", app.st["wander"], app.set_wander)
 
         section(f, "Updates")
         c2 = Card(f)
@@ -307,7 +321,7 @@ class SettingsWindow(kit.Window):
         row2.pack(fill="x", pady=(round(10 * S), 0))
         Btn(row2, "Release notes", lambda: webbrowser.open("https://github.com/safder2000/blip/releases"),
             kind="ghost", small=True, icon="open").pack(side="left")
-        Btn(row2, "Open data folder", lambda: webbrowser.open(str(app.data)), kind="ghost", small=True,
+        Btn(row2, "Open data folder", lambda: plat.open_path(app.data), kind="ghost", small=True,
             icon="open").pack(side="left", padx=(round(6 * S), 0))
 
     def _toggle_row(self, parent, title, desc, value, command):
@@ -896,9 +910,16 @@ class TasksWindow(kit.Window):
         self.sig = sig
         self.list.clear()
         if not bc.connected:
-            empty_state(self.list.inner, "Basecamp isn't connected",
-                        "Sign in once and Blip reminds you about what's due.",
-                        ("Connect Basecamp", lambda: app.open_window("settings", "basecamp")))
+            if all(bc.client_creds()):
+                empty_state(self.list.inner, "Basecamp isn't connected",
+                            "Sign in once and Blip reminds you about what's due. Your browser opens; approve and "
+                            "you're done.",
+                            ("Sign in with Basecamp", app.connect_basecamp, "primary", "open"),
+                            ("Other ways to connect", lambda: app.open_window("settings", "basecamp")))
+            else:
+                empty_state(self.list.inner, "Basecamp isn't connected",
+                            "Connect with an access token in Settings.",
+                            ("Open settings", lambda: app.open_window("settings", "basecamp")))
             return
         if not items and bc.last_fetch:
             empty_state(self.list.inner, "All clear!", "Nothing overdue or due today.")
@@ -936,26 +957,6 @@ class TasksWindow(kit.Window):
 
 
 # ------------------------------------------------------------------ first run
-def full_windows_name():
-    """The signed-in user's display name (e.g. 'Safder Ali'), or '' if Windows doesn't know it."""
-    import ctypes
-    import sys
-    if sys.platform != "win32":
-        return ""
-    try:
-        fn = ctypes.windll.secur32.GetUserNameExW
-        size = ctypes.c_ulong(0)
-        fn(3, None, ctypes.byref(size))          # NameDisplay
-        if not size.value:
-            return ""
-        buf = ctypes.create_unicode_buffer(size.value + 1)
-        if fn(3, buf, ctypes.byref(size)):
-            return buf.value.strip()
-    except Exception:
-        pass
-    return ""
-
-
 class WelcomeWindow(kit.Window):
     title = "Welcome to Blip"
     icon = "heart"
@@ -973,7 +974,7 @@ class WelcomeWindow(kit.Window):
             anchor="w", pady=(round(2 * S), round(8 * S)))
         guess = cfg["display_name"]
         if not cfg.get("named"):
-            guess = full_windows_name() or guess.replace(".", " ").replace("_", " ").title()
+            guess = plat.full_name() or guess.replace(".", " ").replace("_", " ").title()
         self.name = Field(b, guess, width=30)
         self.name.pack(anchor="w", fill="x")
 
