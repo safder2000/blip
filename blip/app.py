@@ -15,8 +15,8 @@ from .basecamp import Basecamp
 from .config import Config, data_dir, frozen, read_json, write_json
 from .net import Net
 from .sound import Sound
-from .sprites import (BANG, COL, FOOD, GH, GW, HEART, ICON, NOTE, PALETTES, POOP, SPARK, SPECIES, ZED, build_egg,
-                      build_pet, draw_text, text_width)
+from .sprites import (BANG, COL, COLORS, FOOD, GH, GW, HEART, ICON, NOTE, PALETTES, POOP, SPARK, SPECIES, ZED,
+                      build_egg, build_pet, draw_text, text_width)
 from .timers import Timers, describe_days, fmt_clock, parse_clock, parse_duration
 from .ui import KEY, CardStack, pixel_box
 from . import kit
@@ -151,6 +151,7 @@ class App:
 
         self.state_path = self.data / "state.json"
         self.st = load_state(self.state_path)
+        self.surprise_look()
         self.timers = Timers(self.data / "timers.json")
         self.inbox = read_json(self.data / "inbox.json", [])
         self.sound = Sound(self.data, lambda: self.cfg["sound"])
@@ -811,6 +812,7 @@ class App:
             win.destroy()
         self.poop_wins = []
         self.st = fresh_state(st["gen"] + 1, st["name"])
+        self.surprise_look()
         self.st["x"], self.st["wander"] = int(self.x), st["wander"]
         self.set_action("idle", 2)
         self.say("a new egg!", 5)
@@ -941,7 +943,19 @@ class App:
         except tk.TclError:
             pass
 
+    def surprise_look(self):
+        """New pets get a random look, so every desk's pet is different from day one.
+        Pets whose owner already picked a look keep it."""
+        st = self.st
+        if st.get("look_chosen"):
+            return
+        if st.get("species", "blip") == "blip" and st.get("color", "auto") == "auto":
+            st["species"] = random.choice(list(SPECIES))
+            st["color"] = random.choice([c for c in COLORS if c != "auto"])
+        st["look_chosen"] = True
+
     def set_look(self, species=None, color=None):
+        self.st["look_chosen"] = True
         if species:
             self.st["species"] = species
         if color:
