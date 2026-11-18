@@ -299,8 +299,9 @@ class Card(tk.Frame):
 
 
 def label(parent, text, kind="body", fg=INK, **kw):
-    font = F.get(kind, F["body"])
-    return tk.Label(parent, text=text, font=font, fg=fg, bg=bg_of(parent), anchor="w", justify="left", **kw)
+    opts = {"font": F.get(kind, F["body"]), "fg": fg, "bg": bg_of(parent), "anchor": "w", "justify": "left"}
+    opts.update(kw)
+    return tk.Label(parent, text=text, **opts)
 
 
 def muted(parent, text, **kw):
