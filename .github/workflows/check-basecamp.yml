@@ -1,0 +1,35 @@
+name: check-basecamp
+
+# Manual check that the Basecamp integration secrets are usable. Prints only lengths and
+# yes/no results, never the values.
+on: workflow_dispatch
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ask Launchpad about the stored client ID
+        env:
+          ID: ${{ secrets.BASECAMP_CLIENT_ID }}
+          SECRET: ${{ secrets.BASECAMP_CLIENT_SECRET }}
+        run: |
+          python3 - <<'PY'
+          import os, urllib.error, urllib.parse, urllib.request
+
+          def ask(cid):
+              url = "https://launchpad.37signals.com/authorization/new?" + urllib.parse.urlencode(
+                  {"response_type": "code", "client_id": cid, "redirect_uri": "http://localhost:47615/callback"})
+              try:
+                  r = urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Blip check"}))
+                  return f"known to Launchpad (HTTP {r.status})"
+              except urllib.error.HTTPError as e:
+                  body = e.read().decode(errors="replace")
+                  return "NOT FOUND" if "Client not found" in body else f"HTTP {e.code}: {body[:80]}"
+
+          i, s = os.environ.get("ID", ""), os.environ.get("SECRET", "")
+          print("client id     length", len(i), "| extra spaces/newlines:", i != i.strip())
+          print("client secret length", len(s), "| extra spaces/newlines:", s != s.strip())
+          print("client id as stored :", ask(i))
+          print("client id trimmed   :", ask(i.strip()))
+          print("secret tried as id  :", ask(s.strip()))
+          PY
