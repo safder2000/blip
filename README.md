@@ -35,8 +35,9 @@ and its menu back.
 ## Using it
 
 - **Left-click** pat · **drag** pick up · **right-click** for the menu (care buttons, timers, colleagues, settings).
-- **Throw it:** fling the pet and it flies, bounces off the screen edges and the taskbar, and gets dizzy after a
-  big bounce. Drop it from high up and it opens a parachute and floats down.
+- **Throw it:** fling the pet and it curls into a ball and rockets off with a little flame trail, ricochets off
+  the screen edges, the top and the taskbar, rolls to a stop and unfolds (dizzy after a wild ride).
+  Just let go and it drops and bounces; once in a while it surprises you with a parachute.
 - Click a poop to clean it. Click the timer sign to open *Timers & alarms*.
 - Pets don't talk like people: they chirp in their own language ("mew?", "arf!", "beep~") with a little
   icon for what they want. Real information ("Sent!", "DND on", "Timer 25:00") shows on a signboard,

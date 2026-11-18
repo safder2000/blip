@@ -187,31 +187,74 @@ class PhysicsTests(unittest.TestCase):
                 return seen
         self.fail("never landed")
 
-    def throw(self, a, y, vx, vy):
+    def throw(self, a, y, vx, vy, ball=False, lucky=False):
         a.st["stage"] = "adult"
         a.y, a.vx, a.vy = y, vx, vy
         a.airborne, a.chute, a.bounces = True, 0, 0
+        a.ball, a.lucky = ball, lucky
         a.set_action("fall", 1e18)
 
-    def test_short_hard_throw_bounces(self):
+    def test_short_drop_bounces(self):
         a = self.app
         g = a.ground()
-        self.throw(a, g - 100 * a.S, 6 * a.S, 18 * a.S)
+        self.throw(a, g - 100 * a.S, 2 * a.S, 18 * a.S)
         seen = self.run_until_landed(a)
         self.assertFalse(seen["chute"])
         self.assertGreaterEqual(seen["bounces"], 1)
         self.assertEqual(a.y, g)
         self.assertEqual(a.action, "idle")
 
-    def test_high_drop_opens_parachute_and_lands_softly(self):
+    def test_high_drop_no_parachute_unless_lucky(self):
         a = self.app
         g = a.ground()
-        top = a.work[1]
-        self.throw(a, max(top, g - 600 * a.S), 0, 0)
+        self.throw(a, max(a.work[1], g - 600 * a.S), 0, 0)
+        self.assertFalse(self.run_until_landed(a)["chute"])
+
+    def test_lucky_high_drop_opens_parachute_and_lands_softly(self):
+        a = self.app
+        g = a.ground()
+        self.throw(a, max(a.work[1], g - 600 * a.S), 0, 0, lucky=True)
         seen = self.run_until_landed(a)
         self.assertTrue(seen["chute"])
         self.assertEqual(seen["bounces"], 0)
         self.assertEqual(a.chute, 0)
+
+    def test_fast_throw_becomes_a_ball_ricochets_and_unfolds(self):
+        a = self.app
+        lo, hi = a.bounds()
+        a.x = (lo + hi) / 2
+        self.throw(a, a.ground() - 200 * a.S, 38 * a.S, -30 * a.S, ball=True)
+        walls = 0
+        for i in range(4000):
+            lo, hi = a.bounds()
+            before = a.vx
+            a.fly(a.ground(), lo, hi)
+            walls += (before > 0) != (a.vx > 0) and a.vx != 0
+            if i % 7 == 0:
+                a.draw()                      # spinning ball + trail renders
+            if not a.ball:
+                break
+        self.assertFalse(a.ball)
+        self.assertGreaterEqual(walls, 1)     # hit a screen edge
+        self.assertGreaterEqual(a.bounces, 2)
+        self.assertEqual(a.action, "unfold")
+        self.assertEqual(a.y, a.ground())
+
+    def test_release_speed_picks_ball_or_drop(self):
+        a = self.app
+        now = time.monotonic()
+
+        class E:
+            x_root, y_root = 500, 300
+        for trail, want in (([(now - 0.05, 100, 300), (now - 0.005, 600, 200)], True),
+                            ([(now - 0.05, 100, 300), (now - 0.005, 104, 302)], False)):
+            a.drag = [0, 0, 0, 0, True]
+            a.set_action("held", 1e18)
+            a.trail = trail
+            a.on_release(E())
+            self.assertEqual(a.ball, want)
+        a.ball = False
+        a.set_action("idle", 1)
 
     def test_parachute_draws(self):
         a = self.app

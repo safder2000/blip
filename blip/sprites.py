@@ -419,3 +419,50 @@ def draw_sprite(canvas, g, x, y, px, tags=()):
     for (cx, cy), c in g.items():
         canvas.create_rectangle(x + cx * px, y + cy * px, x + (cx + 1) * px, y + (cy + 1) * px,
                                 fill=c, width=0, tags=tags)
+
+
+def build_ball(colors, angle=0.0, face=True, squash=0.0):
+    """The pet curled up into a ball for throwing. colors = (body, shade, accent);
+    the face and the curl line turn with `angle` so it looks like it's rolling."""
+    import math
+    body, shade, accent = colors
+    out = COL["out"]
+    cx, cy, r = 16.0, GH - 8.5, 7.5
+    ry = r * (1 - squash)
+    cy2 = GH - 1 - ry
+    inside = set()
+    for y in range(int(cy2 - ry) - 1, GH):
+        for x in range(int(cx - r) - 1, int(cx + r) + 2):
+            dx, dy = (x + 0.5 - cx) / r, (y + 0.5 - cy2) / ry
+            if dx * dx + dy * dy <= 1.0:
+                inside.add((x, y))
+    g = {}
+    for (x, y) in inside:
+        if any(n not in inside for n in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1))):
+            g[(x, y)] = out
+        else:
+            dx, dy = (x + 0.5 - cx) / r, (y + 0.5 - cy2) / ry
+            g[(x, y)] = shade if dx + dy > 0.75 else body
+    hx, hy = int(cx - 3.5), int(cy2 - 3.5 * (1 - squash))
+    for p in ((hx, hy), (hx + 1, hy), (hx, hy + 1)):
+        if g.get(p) == body:
+            g[p] = "#ffffff"
+    # curl line: a short arc that turns with the ball
+    for k in range(5):
+        a = angle + math.pi + 0.35 * k
+        rr = 2.0 + 0.8 * k
+        p = (int(cx + math.cos(a) * rr), int(cy2 + math.sin(a) * rr * (1 - squash)))
+        if g.get(p) not in (None, out):
+            g[p] = shade
+    if face:
+        for side in (-0.45, 0.45):
+            a = angle + side
+            ex, ey = int(cx + math.cos(a) * 4.2), int(cy2 + math.sin(a) * 4.2 * (1 - squash))
+            for p in ((ex, ey), (ex, ey + 1)):
+                if g.get(p) not in (None, out):
+                    g[p] = out
+        a = angle
+        p = (int(cx + math.cos(a) * 5.2), int(cy2 + math.sin(a) * 5.2 * (1 - squash)))
+        if g.get(p) not in (None, out):
+            g[p] = accent
+    return g

@@ -14,6 +14,7 @@ from .basecamp import Basecamp
 from .config import Config, data_dir, frozen, read_json, write_json
 from .net import Net
 from .sound import Sound
+from .sprites import build_ball
 from .sprites import (BANG, COL, COLORS, FOOD, GH, GW, HEART, ICON, NOTE, PALETTES, POOP, SPARK, SPECIES, ZED,
                       build_egg, build_pet, draw_text, text_width)
 from .timers import Timers, describe_days, fmt_clock, parse_clock, parse_duration
@@ -38,6 +39,7 @@ def startup_args():
 
 FAST = 60.0 if "--fast" in sys.argv else 1.0
 HOUR = 3600.0
+CHUTE_CHANCE = 0.1     # a dropped pet now and then pops a parachute: a little surprise
 EGG_TIME = 90
 BABY_END = 12 * HOUR
 CHILD_END = 48 * HOUR
@@ -179,6 +181,7 @@ class App:
         self.dir = random.choice((-1, 1))
         self.vy, self.airborne, self.land = 0.0, False, 0
         self.vx, self.chute, self.bounces, self.trail = 0.0, 0, 0, []
+        self.ball, self.spin, self.lucky, self.ptick = False, 0.0, False, 0
         self.phase = 0.0
         self.food, self.food_t0 = None, 0.0
         self.particles = []
@@ -349,6 +352,8 @@ class App:
             return "normal"
         if a == "held":
             return "held"
+        if a == "unfold":
+            return "happy"
         if a == "fall" and self.airborne:
             return "happy" if self.chute else "held"
         if a == "ring":
@@ -426,7 +431,7 @@ class App:
             self.phase += 0.04
             target = ground - 30 * self.S + math.sin(self.phase) * 6 * self.S
             self.y += (target - self.y) * 0.05
-        elif a == "fall" and (self.airborne or self.y < ground - 0.5):
+        elif a == "fall" and (self.airborne or self.ball or self.y < ground - 0.5):
             self.airborne = True
             self.fly(ground, lo, hi)
         elif self.airborne or self.y < ground - 0.5:
@@ -468,6 +473,10 @@ class App:
             elif self.x > hi:
                 self.x, self.dir = hi, -1
         self.root.geometry(f"+{int(self.x + jitter)}+{int(self.y)}")
+        if self.ball:
+            self.ptick += 1
+            if self.ptick % 2 == 0:
+                self.draw()
         self.root.after(30, self.physics)
 
     def fly(self, ground, lo, hi):
@@ -475,6 +484,9 @@ class App:
         parachute when it falls from high up."""
         S = self.S
         top = self.work[1] - self.bub_h
+        if self.ball:
+            self.roll(ground, lo, hi)
+            return
         if self.chute:
             self.chute += 1
             self.vy += (1.7 * S - self.vy) * 0.12       # drift down slowly
@@ -484,7 +496,7 @@ class App:
             self.vy += 0.9 * S
             self.vx *= 0.995
             self.x += self.vx
-            if self.vy > 3 * S and ground - self.y > 190 * S and not self.bounces:
+            if self.lucky and self.vy > 3 * S and ground - self.y > 190 * S and not self.bounces:
                 self.chute = 1
                 self.bubble_until = 0       # the canopy needs the space above the head
         self.y += self.vy
@@ -513,6 +525,45 @@ class App:
             self.chirp("happy", None, 2)
         elif hard and self.hatched():
             self.chirp("dizzy", None, 2.5)
+
+    BALL_SPEED = 14       # px per tick (at 100% scale) that turns a throw into a ball
+
+    def roll(self, ground, lo, hi):
+        """Curled-up ball: ricochets off the screen edges, the top and the taskbar, then rolls
+        to a stop and unfolds."""
+        S, P = self.S, self.P
+        top = self.work[1] - self.bub_h - 12 * P
+        self.vy += 0.75 * S
+        self.vx *= 0.998
+        self.x += self.vx
+        self.y += self.vy
+        self.spin += self.vx / (7.5 * P)
+        hit = False
+        if self.x < lo:
+            self.x, self.vx, hit = lo, abs(self.vx) * 0.78, True
+        elif self.x > hi:
+            self.x, self.vx, hit = hi, -abs(self.vx) * 0.78, True
+        if self.y < top:
+            self.y, self.vy, hit = top, abs(self.vy) * 0.7, True
+        if hit and math.hypot(self.vx, self.vy) > 12 * S:
+            self.spawn("spark", 2)
+        if self.y < ground:
+            return
+        self.y = ground
+        if self.vy > 2.5 * S:
+            self.vy = -self.vy * 0.62
+            self.vx *= 0.92
+            self.bounces += 1
+            self.land = 1
+            return
+        self.vy = 0.0
+        self.vx *= 0.955                       # rolling along the taskbar
+        if abs(self.vx) < 0.5 * S:
+            self.vx = 0.0
+            self.ball, self.airborne = False, False
+            self.land = 3
+            self.set_action("unfold", 0.6)
+            self.draw()
 
     def jump(self):
         self.vy = -8.5 * self.S
@@ -544,6 +595,14 @@ class App:
             self.finish_eat()
         elif a == "play" and now >= self.action_until and not self.airborne:
             self.set_action("idle", 2)
+        elif a == "unfold" and now >= self.action_until:
+            self.set_action("idle", 1.5)
+            if self.hatched():
+                if self.bounces >= 3:
+                    self.chirp("dizzy", None, 2.5)
+                else:
+                    self.chirp("wow", None, 2)
+                    self.happy_until = now + 2
         if self.st["asleep"] and self.frame % 5 == 0:
             self.spawn("z")
         if a == "ring" and self.frame % 2 == 0:
@@ -1503,7 +1562,12 @@ class App:
     def draw(self):
         cv, st, P, oy = self.cv, self.st, self.P, self.bub_h
         cv.delete("px")
-        if st["stage"] == "egg" and not st["gone"]:
+        if self.ball:
+            egg = st["stage"] == "egg"
+            cols = (COL["egg"], COL["egg2"], COL["spot"]) if egg else PALETTES[self.palette()]
+            g = build_ball(cols, self.spin, face=not egg, squash=0.25 if self.land else 0.0)
+            self.add_trail(g)
+        elif st["stage"] == "egg" and not st["gone"]:
             g = build_egg(self.frame, min(1.0, st["age"] / EGG_TIME))
         else:
             a = self.action
@@ -1549,6 +1613,29 @@ class App:
             self.draw_bubble()
         else:
             self.draw_sign()
+
+    def add_trail(self, g):
+        """Rocket flame and smoke puffs behind a fast ball."""
+        v = math.hypot(self.vx, self.vy)
+        if v < 8 * self.S:
+            return
+        ux, uy = -self.vx / v, -self.vy / v
+        cx, cy = 16, GH - 8.5
+        xmin, xmax = -self.ox // self.P, (self.W - self.ox) // self.P - 1
+        ymin = -self.bub_h // self.P
+        n = 2 + min(3, int(v / (8 * self.S)))
+        for k in range(n):
+            d = 9 + 3.2 * k
+            size = 3 if k < 2 else 2
+            col = ("#fff1a8", "#ffb347", "#ff6b3d", "#cfc8dc", "#b3abc4")[min(k, 4)]
+            jx = random.uniform(-0.8, 0.8) * k * 0.4
+            jy = random.uniform(-0.8, 0.8) * k * 0.4
+            px, py = int(cx + ux * d - uy * jx), int(cy + uy * d + ux * jy)
+            for dx in range(size):
+                for dy in range(size):
+                    x, y = px + dx - size // 2, py + dy - size // 2
+                    if xmin <= x <= xmax and ymin <= y < GH:
+                        g.setdefault((x, y), col)
 
     def add_chute(self, g):
         """A striped pixel parachute above the pet's head, swaying a little."""
@@ -1672,6 +1759,7 @@ class App:
                 self.clamp()
                 self.chirp("angry")
             if self.action != "gone":
+                self.ball, self.chute = False, 0
                 self.set_action("held", 1e18)
                 self.food = None
                 self.ring_target = None
@@ -1691,6 +1779,8 @@ class App:
                 self.vx, self.vy = self.throw_speed()
                 self.airborne = True
                 self.chute, self.bounces = 0, 0
+                self.ball = math.hypot(self.vx, self.vy) > self.BALL_SPEED * self.S
+                self.lucky = not self.ball and random.random() < CHUTE_CHANCE
                 self.set_action("fall", 1e18)
                 if self.alerts:
                     self.root.after(1500, lambda: self.alerts and self.set_action("ring", 1e18))
