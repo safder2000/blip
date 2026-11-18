@@ -19,14 +19,14 @@ THEMES = {
         TRACK_SOFT="#ece8f4", TRACK_LIT="#d9d3e6", BORDER_HOV="#cfc6e2", PLACEHOLDER="#a9a2bd", TILE="#f7f5fb",
         KNOB="#ffffff", FRAME=COL["out"], SHADOW=COL["out"], PAPER="#fffdf7", PAPER_INK=COL["out"],
         PAPER_BTN="#ffffff"),
-    "dark": dict(
-        BG="#16141d", SURFACE="#201d29", LINE="#302c3d", INK="#ece8f6", MUTED="#9a93b0",
-        ACCENT="#8496ec", ACCENT_DK="#6b7fd7", ACCENT_SOFT="#282b47", ACCENT_SOFT2="#323659", ON_ACCENT="#ffffff",
-        HOVER="#292534", OK="#3ec58a", WARN="#f0b040", WARN_INK="#f2c56a", WARN_SOFT="#382e1b",
-        DANGER="#f0646a", DANGER_SOFT="#3a2027", OFF="#5f5973", OFF_FILL="#363a5c", TRACK="#3b3649",
-        TRACK_SOFT="#2b2736", TRACK_LIT="#4a4459", BORDER_HOV="#4a4459", PLACEHOLDER="#6f6886", TILE="#25222f",
-        KNOB="#ffffff", FRAME="#4d4762", SHADOW="#07060a", PAPER="#221f2c", PAPER_INK="#ece8f6",
-        PAPER_BTN="#2e2a3b"),
+    "dark": dict(           # neutral charcoal, no blue tint
+        BG="#191919", SURFACE="#1f1f1f", LINE="#303030", INK="#efefef", MUTED="#9c9c9c",
+        ACCENT="#8a9bef", ACCENT_DK="#7385e0", ACCENT_SOFT="#2e2e2e", ACCENT_SOFT2="#383838", ON_ACCENT="#ffffff",
+        HOVER="#272727", OK="#3ec58a", WARN="#e8ad48", WARN_INK="#e8bf72", WARN_SOFT="#2f2a20",
+        DANGER="#ee6b6b", DANGER_SOFT="#352222", OFF="#5e5e5e", OFF_FILL="#3a3a3a", TRACK="#3a3a3a",
+        TRACK_SOFT="#282828", TRACK_LIT="#4a4a4a", BORDER_HOV="#474747", PLACEHOLDER="#6b6b6b", TILE="#262626",
+        KNOB="#ffffff", FRAME="#404040", SHADOW="#0a0a0a", PAPER="#1f1f1f", PAPER_INK="#efefef",
+        PAPER_BTN="#2a2a2a"),
 }
 THEME = "dark"
 globals().update(THEMES[THEME])
