@@ -20,6 +20,10 @@ No admin rights needed. It installs to `%LOCALAPPDATA%\Programs\Blip` and starts
 
 - **Left-click** pat · **drag** pick up · **right-click** for the menu (care buttons, timers, calls, settings).
 - Click a poop to clean it. Click the timer sign to open *Timers & alarms*.
+- Pets don't talk like people: they chirp in their own language ("mew?", "arf!", "beep~") with a little
+  icon for what they want. Real information ("Sent!", "DND on", "Timer 25:00") shows on a signboard,
+  and calls, messages, alarms and Basecamp reminders pop up as cards.
+- Sounds are off by default (Settings → General → Sounds).
 - **Settings → Pet** to pick a look (Blip, Kitty, Bunny, Bear, Pup, Chick, Bot) and a colour.
   The first time Blip starts it asks your name and lets you pick your pet; colleagues see both.
 - Blip also lives in the **system tray** (the ^ next to the clock): click it for the menu,

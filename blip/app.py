@@ -109,6 +109,50 @@ def load_state(path):
     return base
 
 
+CRIES = {"blip": ("blip", "bloo"), "kitty": ("mew", "nya"), "bunny": ("pip", "puu"), "bear": ("bwuh", "rawr"),
+         "pup": ("arf", "wuf"), "chick": ("piyo", "cheep"), "bot": ("beep", "boop")}
+
+
+def cry(species, mood="happy"):
+    """A little Pokemon-style line in the pet's own language."""
+    a, b = CRIES.get(species, CRIES["blip"])
+    A = a.capitalize()
+    forms = {
+        "happy": [f"{A}!", f"{A} {a}!", f"{b}~!", f"{A}~"],
+        "love": [f"{a}~ \u2665", f"{b} {b}~ \u2665", f"\u2665 {A}!"],
+        "ask": [f"{A}?", f"{a} {a}?", f"{b}?"],
+        "sad": [f"{a}...", f"{b}...", f"...{a}"],
+        "no": [f"{A}! {A}!", f"{b}!!", f"nn~ {a}!"],
+        "angry": [f"{A.upper()}!!", f"{b.upper()}!"],
+        "sleepy": [f"{a}... zz", "zzz...", f"{b}~ zz"],
+        "music": [f"\u266a {a}~", f"{b} \u266a", f"\u266a\u266a {a}"],
+        "oops": [f"{a}...!", f"{A}?!"],
+        "wow": [f"{A}!!", f"{A}~!!", f"{b} {b}!!"],
+    }
+    return random.choice(forms.get(mood, forms["happy"]))
+
+
+def wrap_words(text, width):
+    lines, cur = [], ""
+    for word in text.split():
+        while len(word) > width:
+            if cur:
+                lines.append(cur)
+                cur = ""
+            lines.append(word[:width])
+            word = word[width:]
+        if not cur:
+            cur = word
+        elif len(cur) + 1 + len(word) <= width:
+            cur += " " + word
+        else:
+            lines.append(cur)
+            cur = word
+    if cur:
+        lines.append(cur)
+    return lines or [""]
+
+
 def fmt_age(sec):
     sec = int(sec)
     d, h, m = sec // 86400, sec % 86400 // 3600, sec % 3600 // 60
@@ -138,7 +182,8 @@ class App:
         S = self.S = root.winfo_fpixels("1i") / 96.0
         self.P = max(3, round(4 * S))
         self.bub_h = round(48 * S)
-        self.W = GW * self.P
+        self.W = max(GW * self.P, round(200 * S))
+        self.ox = (self.W - GW * self.P) // 2
         self.H = self.bub_h + GH * self.P
         root.overrideredirect(True)
         root.attributes("-topmost", True)
@@ -176,7 +221,8 @@ class App:
         self.phase = 0.0
         self.food, self.food_t0 = None, 0.0
         self.particles = []
-        self.bubble, self.bubble_until = "", 0.0
+        self.bubble, self.bubble_until, self.bubble_icon = "", 0.0, None
+        self.board_text, self.board_until = "", 0.0
         self.happy_until = 0.0
         self.last_pat = 0.0
         self.last_nag = time.monotonic()
@@ -214,7 +260,7 @@ class App:
         elif gap > 120:
             self.catch_up(gap)
         if self.st["stage"] == "egg" and not self.st["gone"]:
-            self.say("an egg appeared!" if self.st["age"] < 5 else "(the egg is warm)", 5)
+            self.st["age"] < 5 and self.board("A new egg!", 5)
         if self.st["asleep"]:
             self.set_action("sleep", 1e18)
         self.check_growth()
@@ -262,14 +308,26 @@ class App:
 
     def bounds(self):
         l, t, r, b = self.work
-        pad = 6 * self.P
+        pad = self.ox + 6 * self.P
         return l - pad, r - self.W + pad
 
     def ground(self):
         return self.work[3] - self.H
 
-    def say(self, text, secs=4.0):
-        self.bubble, self.bubble_until = text, time.monotonic() + secs
+    def say(self, text, secs=4.0, icon=None):
+        """Low level: put text (and an optional pixel icon) in the speech bubble."""
+        self.bubble, self.bubble_until, self.bubble_icon = text, time.monotonic() + secs, icon
+
+    def chirp(self, mood="happy", icon=None, secs=3.0):
+        """The pet 'talks' in its own little language, plus an icon for what it wants."""
+        if self.st["gone"]:
+            self.say("...", secs)
+        elif self.st["stage"] != "egg":
+            self.say(cry(self.species(), mood), secs, icon)
+
+    def board(self, text, secs=3.5):
+        """Real information (sent, timer set, do not disturb...) goes on a little signboard."""
+        self.board_text, self.board_until = text, time.monotonic() + secs
 
     def set_action(self, a, secs):
         self.action, self.action_until = a, time.monotonic() + secs
@@ -343,13 +401,13 @@ class App:
     def busy_or_unable(self, what):
         st = self.st
         if st["gone"]:
-            self.say("...")
+            self.chirp()
             return True
         if st["stage"] == "egg":
-            self.say("(it's still an egg)")
+            self.board("Still an egg")
             return True
         if st["asleep"] and what != "wake":
-            self.say("zzz... (asleep)")
+            self.chirp("sleepy")
             return True
         if self.action in ("eat", "held", "ring"):
             return True
@@ -538,17 +596,17 @@ class App:
         if not st["sick"] and (s["hygiene"] < 25 or s["full"] < 15 or st["snacks"] > 3) \
                 and random.random() < 0.6 * h:
             st["sick"] = True
-            self.say("I don't feel so good...", 5)
+            self.chirp("sad", "pill", 5)
         if st["next_poop"] is not None and st["age"] >= st["next_poop"]:
             st["next_poop"] = None
             self.add_poop()
         if not st["asleep"] and s["energy"] < 8 and self.action in ("idle", "walk"):
             st["asleep"] = True
             self.set_action("sleep", 1e18)
-            self.say("so sleepy...")
+            self.chirp("sleepy", "moon")
         if st["asleep"] and s["energy"] >= 100:
             st["asleep"] = False
-            self.say("good morning!")
+            self.chirp("happy")
             self.choose()
         if st["stage"] in ("baby", "child"):
             st["care_total"] += dt
@@ -589,7 +647,7 @@ class App:
             st["care_good"] += gap * 0.5
         self.check_growth()
         if gap > 600:
-            self.say(random.choice(["welcome back!", "I missed you!", "you're back!"]), 5)
+            self.chirp("love", "heart", 5)
             self.happy_until = time.monotonic() + 3
 
     def clamp(self):
@@ -612,7 +670,8 @@ class App:
 
     def grew(self):
         self.spawn("spark", 8)
-        self.say(f"{self.st['name']} grew up!", 5)
+        self.chirp("wow")
+        self.board("Grew up!", 5)
         self.sound.play("done")
         self.happy_until = time.monotonic() + 3
         self.save()
@@ -622,7 +681,7 @@ class App:
         st["stage"] = "baby"
         st["age"] = max(st["age"], EGG_TIME)
         self.spawn("spark", 8)
-        self.say(f"hi! I'm {st['name']}!", 5)
+        self.chirp("wow", "heart", 5)
         self.sound.play("done")
         self.happy_until = time.monotonic() + 4
         self.set_action("idle", 2)
@@ -636,7 +695,8 @@ class App:
         self.poop_wins, st["poops"] = [], []
         self.set_action("gone", 1e18)
         self.sound.play("sad")
-        self.say(f"{st['name']} floated off to the pet planet... (right-click: new egg)", 12)
+        self.say("...", 12)
+        self.cards.show("Goodbye", f"{st['name']} floated off to the pet planet. Right-click and hatch a new egg any time.", [("New egg", self.new_egg), ("OK", lambda: None)], kind="info", icon="heart")
         self.save()
 
     def nag(self):
@@ -648,27 +708,26 @@ class App:
         if overdue and self.cfg["bc_enabled"] and now - self.last_bc_nag > 45 * 60 \
                 and time.time() > self.bc_snooze_until:
             self.last_bc_nag = now
-            self.say(f"{len(overdue)} overdue Basecamp task{'s' if len(overdue) > 1 else ''}...")
+            self.board(f"{len(overdue)} task{'s' if len(overdue) > 1 else ''} overdue", 5)
             return
         if now - self.last_nag < 30:
             return
         s = st["stats"]
-        msg = None
         if st["sick"]:
-            msg = "I feel sick... (medicine?)"
+            self.chirp("sad", "pill")
         elif len(st["poops"]) >= 3:
-            msg = "it's getting smelly!"
+            self.chirp("no", "clean")
         else:
-            needs = [(s["full"], "I'm hungry!"), (s["happy"], "play with me?"),
-                     (s["energy"], "so tired..."), (s["hygiene"], "I feel icky...")]
-            val, text = min(needs)
+            needs = [(s["full"], "ask", "meal"), (s["happy"], "ask", "play"),
+                     (s["energy"], "sleepy", "moon"), (s["hygiene"], "sad", "clean")]
+            val, mood, icon = min(needs, key=lambda n: n[0])
             if val < 25:
-                msg = text
+                self.chirp(mood, icon)
             elif random.random() < 0.06:
-                msg = random.choice(["♪", "la la la~", "hi!", "♪♪", "*hums*"])
-        if msg:
-            self.say(msg)
-            self.last_nag = now
+                self.chirp("music")
+            else:
+                return
+        self.last_nag = now
 
     # ------------------------------------------------ care actions
     def feed(self, kind):
@@ -677,7 +736,7 @@ class App:
         st, s = self.st, self.st["stats"]
         if kind == "meal":
             if s["full"] >= 92:
-                self.say("I'm full!")
+                self.chirp("no", "meal")
                 return
             s["full"] += 35
             s["happy"] += 3
@@ -698,11 +757,11 @@ class App:
     def finish_eat(self):
         kind, self.food = self.food, None
         if kind == "pill":
-            self.say("feeling better!")
+            self.chirp("happy", "heart")
         elif kind == "snack" and self.st["snacks"] > 3:
-            self.say("my tummy hurts...")
+            self.chirp("sad", "pill")
         else:
-            self.say(random.choice(["yum!", "nom nom", "tasty!"]))
+            self.chirp("love")
             self.happy_until = time.monotonic() + 2
             self.spawn("heart")
         self.set_action("idle", 2)
@@ -712,13 +771,13 @@ class App:
             return
         s = self.st["stats"]
         if self.st["sick"]:
-            self.say("too sick to play...")
+            self.chirp("no", "pill")
             return
         if s["energy"] < 15:
-            self.say("too tired...")
+            self.chirp("no", "moon")
             return
         if s["full"] < 10:
-            self.say("too hungry to play...")
+            self.chirp("no", "meal")
             return
         s["happy"] += 20
         s["energy"] -= 10
@@ -729,7 +788,7 @@ class App:
         self.jump()
         self.spawn("heart", 2)
         self.sound.play("pop")
-        self.say(random.choice(["wheee!", "yay!", "again!"]))
+        self.chirp("wow")
 
     def clean(self):
         st = self.st
@@ -742,14 +801,14 @@ class App:
         was = st["stats"]["hygiene"]
         st["stats"]["hygiene"] = 100.0
         self.spawn("spark", 6)
-        self.say("squeaky clean!" if n or was < 70 else "already clean~")
+        self.chirp("happy" if n or was < 70 else "ask")
 
     def medicine(self):
         if self.busy_or_unable("medicine"):
             return
         st = self.st
         if not st["sick"]:
-            self.say("I'm not sick! bleh")
+            self.chirp("no", "pill")
             st["stats"]["happy"] -= 5
             self.clamp()
             return
@@ -765,15 +824,15 @@ class App:
             return
         if st["asleep"]:
             st["asleep"] = False
-            self.say("*yawn*... still sleepy" if st["stats"]["energy"] < 40 else "morning!")
+            self.chirp("sleepy" if st["stats"]["energy"] < 40 else "happy")
             self.choose()
         else:
             if st["stats"]["energy"] > 85:
-                self.say("not sleepy!")
+                self.chirp("no", "moon")
                 return
             st["asleep"] = True
             self.set_action("sleep", 1e18)
-            self.say("good night...")
+            self.chirp("sleepy", "moon")
 
     def pat(self):
         st = self.st
@@ -782,13 +841,13 @@ class App:
             self.open_cards_front()
             return
         if st["gone"]:
-            self.say("...")
+            self.chirp()
             return
         if st["stage"] == "egg":
-            self.say("(the egg wiggles)")
+            self.land = 2
             return
         if st["asleep"]:
-            self.say("zzz...")
+            self.chirp("sleepy")
             return
         self.happy_until = now + 1.5
         self.spawn("heart")
@@ -797,7 +856,7 @@ class App:
             self.clamp()
         self.last_pat = now
         if random.random() < 0.35:
-            self.say(random.choice(["hehe", "♥", "more!", "purr~"]), 2)
+            self.chirp("love", None, 2)
 
     def open_cards_front(self):
         for c in self.cards.cards:
@@ -815,7 +874,7 @@ class App:
         self.surprise_look()
         self.st["x"], self.st["wander"] = int(self.x), st["wander"]
         self.set_action("idle", 2)
-        self.say("a new egg!", 5)
+        self.board("A new egg!", 5)
         self.save()
 
     # ------------------------------------------------ poops
@@ -832,7 +891,7 @@ class App:
         st["stats"]["hygiene"] -= 5
         self.clamp()
         self._poop_window(px)
-        self.say("oops...", 3)
+        self.chirp("oops")
 
     def _poop_window(self, px):
         P = self.P
@@ -865,26 +924,25 @@ class App:
         win.destroy()
         self.st["stats"]["hygiene"] += 8
         self.clamp()
-        if not self.st["gone"] and not self.st["asleep"]:
-            self.say("thanks!", 2)
+        self.spawn("spark", 2)
 
     # ------------------------------------------------ timers & alarms
     def start_timer(self, secs, label=""):
         it = self.timers.add_timer(secs, label)
-        self.say(f"timer: {fmt_clock(secs)}" + (f" ({label})" if label else ""), 3)
+        self.board(f"Timer {fmt_clock(secs)}", 3)
         self.sound.play("pop")
         self.draw()
         return it
 
     def start_stopwatch(self, label=""):
         self.timers.add_stopwatch(label)
-        self.say("stopwatch started", 3)
+        self.board("Stopwatch on", 3)
         self.sound.play("pop")
         self.draw()
 
     def add_alarm(self, hh, mm, days, label=""):
         self.timers.add_alarm(hh, mm, days, label)
-        self.say(f"alarm {hh:02d}:{mm:02d} ({describe_days(days)})", 4)
+        self.board(f"Alarm {hh:02d}:{mm:02d} {describe_days(days)}", 4)
         self.sound.play("pop")
 
     def ask_timer(self):
@@ -893,7 +951,7 @@ class App:
             return
         secs = parse_duration(txt)
         if not secs:
-            self.say("hmm, I didn't get that time")
+            self.board("Try 25 or 1:30")
             return
         self.start_timer(secs)
 
@@ -904,7 +962,7 @@ class App:
             return
         hm = parse_clock(txt)
         if not hm:
-            self.say("hmm, I didn't get that time")
+            self.board("Try 25 or 1:30")
             return
         self.add_alarm(hm[0], hm[1], [])
 
@@ -1003,7 +1061,7 @@ class App:
         self.cfg.save()
         self.var_dnd.set(self.cfg["dnd"])
         self.net_rescan()
-        self.say("do not disturb: on" if on else "do not disturb: off", 3)
+        self.board("DND on" if on else "DND off", 3)
         if self.tray:
             self.tray.refresh_menu()
 
@@ -1037,7 +1095,7 @@ class App:
 
     def call(self, pid):
         if not self.net:
-            self.say("office network is off")
+            self.board("Network off")
             return
         name = self.peer_name(pid)
         cid = uuid.uuid4().hex[:12]
@@ -1132,7 +1190,7 @@ class App:
 
     def compose(self, pid, parent=None, name=None):
         if not self.net:
-            self.say("office network is off")
+            self.board("Network off")
             return
         name = name or self.peer_name(pid)
         text = W.ask_text(self, f"Message {name}", f"Message to {name}:", parent=parent)
@@ -1141,7 +1199,7 @@ class App:
         text = text.strip()[:500]
 
         def sent(ok):
-            self.post(self.say, "sent!" if ok else f"couldn't reach {name}", 3)
+            self.post(self.board, "Sent!" if ok else f"Can't reach {name}", 3)
         self.log_inbox("out", pid, name, text)
         self.net.send(pid, "msg", {"text": text}, sent)
 
@@ -1199,7 +1257,7 @@ class App:
 
     def complete_task(self, item):
         if item.get("type") not in ("todo", "Todo", None):
-            self.say("only to-dos can be ticked off here")
+            self.board("Only to-dos")
             return
 
         def done(ok, err):
@@ -1207,11 +1265,12 @@ class App:
                 self.sound.play("done")
                 self.spawn("spark", 6)
                 self.happy_until = time.monotonic() + 3
-                self.say("done! ✓", 3)
+                self.board("\x05 Done!", 3)
+                self.chirp("wow")
                 self.st["stats"]["happy"] += 5
                 self.clamp()
             else:
-                self.say("couldn't tick it off...", 4)
+                self.board("Couldn't tick it", 4)
             win = self.windows.get("tasks")
             if win and win.alive():
                 win.refresh()
@@ -1225,7 +1284,7 @@ class App:
     def check_updates(self, manual=False):
         self.updater.check(lambda info, err: self.on_update_info(info, err, manual))
         if manual:
-            self.say("checking for updates...", 3)
+            self.board("Checking...", 3)
 
     def on_update_info(self, info, err, manual):
         if err:
@@ -1252,7 +1311,7 @@ class App:
         if self.alerts or self.calls_out or self.calls_in:
             self.root.after(10 * 60 * 1000, lambda: self.install_update(info))
             return
-        self.say(f"updating to v{info['version']}...", 30)
+        self.board(f"Updating v{info['version']}", 30)
         self.updater.fetch(info, self.on_update_ready)
 
     def on_update_ready(self, path, err):
@@ -1332,10 +1391,12 @@ class App:
                     g[(x + dx, y + dy)] = col
         for (x, y), c in g.items():
             if y * P + oy >= 0:
-                cv.create_rectangle(x * P, oy + y * P, (x + 1) * P, oy + (y + 1) * P,
+                cv.create_rectangle(self.ox + x * P, oy + y * P, self.ox + (x + 1) * P, oy + (y + 1) * P,
                                     fill=c, width=0, tags="px")
         cv.delete("bub")
-        if self.bubble and time.monotonic() < self.bubble_until:
+        if self.board_text and time.monotonic() < self.board_until:
+            self.draw_board()
+        elif self.bubble and time.monotonic() < self.bubble_until:
             self.draw_bubble()
         else:
             self.draw_sign()
@@ -1364,15 +1425,37 @@ class App:
         if n > 1:
             draw_text(cv, x0 + w + 2 * px, y0, f"+{n - 1}", px, COL["out"], ("bub", "sign"))
 
+    def draw_board(self):
+        cv, S = self.cv, self.S
+        px = max(1, round(2 * S))
+        tags = ("bub", "board")
+        maxc = max(6, int((self.W - 16 * px) // (6 * px)))
+        lines = wrap_words(self.board_text.upper(), maxc)[:3]
+        lh = 9 * px
+        tw = max(text_width(ln, px) for ln in lines)
+        w, h = tw + 10 * px, len(lines) * lh + 5 * px
+        x0 = int(self.W / 2 - w / 2)
+        y1 = int(self.bub_h + (self.top_row - 2) * self.P - 3 * px)
+        y1 = max(y1, h + 1)
+        y0 = y1 - h
+        wood, cream = "#8b5a2b", "#fff1d0"
+        cv.create_rectangle(self.W / 2 - px, y1, self.W / 2 + px, y1 + 4 * px, fill=wood, width=0, tags=tags)
+        pixel_box(cv, x0, y0, x0 + w, y1, px, wood, tags)
+        pixel_box(cv, x0 + px, y0 + px, x0 + w - px, y1 - px, px, cream, tags)
+        for i, ln in enumerate(lines):
+            draw_text(cv, int(self.W / 2 - text_width(ln, px) / 2), y0 + 3 * px + i * lh, ln, px, COL["out"], tags)
+
     def draw_bubble(self):
         cv, S = self.cv, self.S
         cx = self.W / 2
         ty = self.bub_h + (self.top_row - 3) * self.P - 8 * S
         ty = max(ty, 30 * S)
-        t = cv.create_text(cx, ty, text=self.bubble, font=self.font, fill=COL["out"],
-                           anchor="s", width=self.W - 14 * S, justify="center", tags="bub")
+        ip = max(1, round(2 * S))
+        iw = (5 * ip + round(5 * S)) if self.bubble_icon else 0
+        t = cv.create_text(cx - iw / 2, ty, text=self.bubble, font=self.font, fill=COL["out"],
+                           anchor="s", width=round(150 * S), justify="center", tags="bub")
         x1, y1, x2, y2 = cv.bbox(t)
-        x1, y1, x2, y2 = x1 - 6 * S, y1 - 3 * S, x2 + 6 * S, y2 + 3 * S
+        x1, y1, x2, y2 = x1 - 6 * S, y1 - 3 * S, x2 + 6 * S + iw, y2 + 3 * S
         if y1 < 1:
             cv.move(t, 0, 1 - y1)
             y2 += 1 - y1
@@ -1384,11 +1467,18 @@ class App:
         cv.create_rectangle(cx - 4 * S + lw, y2 - lw, cx + 4 * S - lw + 1, y2 + 1,
                             fill=COL["white"], width=0, tags="bub")
         cv.tag_raise(t)
+        if self.bubble_icon:
+            draw_text(cv, x2 - 6 * S - 5 * ip, (y1 + y2) / 2 - 3.5 * ip, ICON[self.bubble_icon], ip,
+                      COL["z"], "bub")
 
     # ------------------------------------------------ input
     def on_press(self, e):
         if self.menu:
             self.menu.close()
+        if "board" in self.cv.gettags("current"):
+            self.board_until = 0
+            self.drag = None
+            return
         if "sign" in self.cv.gettags("current"):
             self.drag = None
             self.open_window("timers")
@@ -1405,7 +1495,7 @@ class App:
                 self.st["asleep"] = False
                 self.st["stats"]["happy"] -= 5
                 self.clamp()
-                self.say("hey! I was sleeping!")
+                self.chirp("angry")
             if self.action != "gone":
                 self.set_action("held", 1e18)
                 self.food = None
@@ -1538,7 +1628,7 @@ class App:
         name = W.ask_text(self, "Rename", "Pet name:", initial=self.st["name"])
         if name and name.strip():
             self.st["name"] = name.strip()[:16]
-            self.say(f"I'm {self.st['name']}!")
+            self.chirp("happy", "heart")
             self.save()
 
     def save(self):
@@ -1588,7 +1678,7 @@ class App:
         self.temp_shown = False
         self._set_visible(on)
         if on:
-            self.say("I'm back!", 3)
+            self.chirp("happy")
         self.save()
         if self.tray:
             self.tray.refresh_menu()

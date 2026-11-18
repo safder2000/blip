@@ -233,7 +233,7 @@ class SettingsWindow(kit.Window):
         v = v.strip()[:16]
         if v and v != self.app.st["name"]:
             self.app.st["name"] = v
-            self.app.say(f"I'm {v}!")
+            self.app.chirp("happy", "heart")
             self.app.save()
 
     def _pick_species(self, k):
@@ -1025,5 +1025,6 @@ class WelcomeWindow(kit.Window):
         app.save()
         app.net_rescan()
         self.close()
-        app.say(f"hi {name.split()[0]}! I'm {pet}", 6)
+        app.chirp("love", "heart", 5)
+        app.board(f"Hi {name.split()[0]}!", 5)
         app.happy_until = time.monotonic() + 4

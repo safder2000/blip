@@ -52,7 +52,7 @@ DEFAULTS = {
     "dnd": False,
     "relay": "",                   # optional "host:port" of a relay (blip.relay) when broadcast is blocked
     "manual_peers": "",            # optional comma-separated IPs to say hello to directly
-    "sound": True,
+    "sound": False,                # quiet by default; Settings > General > Sounds
     "auto_update": True,
     "bc_token": "",
     "bc_refresh": "",
@@ -77,6 +77,10 @@ class Config(dict):
             changed = True
         if not self.get("node_id"):
             self["node_id"] = uuid.uuid4().hex
+            changed = True
+        if self.get("cfg_version", 1) < 2:   # v0.4: sounds became opt-in, for existing installs too
+            self["sound"] = False
+            self["cfg_version"] = 2
             changed = True
         if changed:
             self.save()
