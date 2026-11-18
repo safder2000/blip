@@ -11,4 +11,5 @@ out.write_text(
     f"BC_CLIENT_ID = {os.environ.get('BC_CLIENT_ID', '')!r}\n"
     f"BC_CLIENT_SECRET = {os.environ.get('BC_CLIENT_SECRET', '')!r}\n",
     encoding="utf-8")
-print("stamped", version)
+have = bool(os.environ.get("BC_CLIENT_ID")) and bool(os.environ.get("BC_CLIENT_SECRET"))
+print("stamped", version, "- Basecamp integration built in:", "yes" if have else "no")
