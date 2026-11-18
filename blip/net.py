@@ -119,6 +119,11 @@ class Net:
         except OSError as e:
             self.error = str(e)
             self.running = False
+            for sock in (getattr(self, "tcp", None), getattr(self, "udp", None)):
+                try:
+                    sock and sock.close()
+                except OSError:
+                    pass
             return False
         for fn in (self._udp_loop, self._tcp_loop, self._announce_loop):
             threading.Thread(target=fn, daemon=True).start()

@@ -40,11 +40,18 @@ class Inbox:
 
 
 def make(name, passphrase, udp, announce, relay="", manual=("127.0.0.1",)):
-    box = Inbox()
-    n = Net(uuid.uuid4().hex, lambda: {"name": name, "status": "available", "ver": "t"}, passphrase, box,
-            udp_port=udp, tcp_port=0, announce_port=announce, relay=relay, manual_peers=manual)
-    assert n.start(), n.error
-    return n, box
+    """udp=None picks a free port, retrying if another process grabs it first (busy CI machines)."""
+    for attempt in range(8):
+        port = free_udp_port() if udp is None else udp
+        box = Inbox()
+        n = Net(uuid.uuid4().hex, lambda: {"name": name, "status": "available", "ver": "t"}, passphrase, box,
+                udp_port=port, tcp_port=0, announce_port=announce, relay=relay, manual_peers=manual)
+        if n.start():
+            return n, box
+        if udp is not None:
+            break
+        time.sleep(0.1)
+    raise AssertionError(n.error)
 
 
 class SealTests(unittest.TestCase):
@@ -109,8 +116,8 @@ class RelayTests(unittest.TestCase):
         relay = Relay(port=0, host="127.0.0.1").start()
         addr = f"127.0.0.1:{relay.port}"
         dead = free_udp_port()   # nobody listens here, so no LAN path between the two
-        a, abox = make("Ann", "office", free_udp_port(), dead, relay=addr, manual=())
-        b, bbox = make("Ben", "office", free_udp_port(), dead, relay=addr, manual=())
+        a, abox = make("Ann", "office", None, dead, relay=addr, manual=())
+        b, bbox = make("Ben", "office", None, dead, relay=addr, manual=())
         try:
             self.assertTrue(wait(lambda: any(p["name"] == "Ben" for p in a.online()), 10))
             self.assertTrue(wait(lambda: any(p["name"] == "Ann" for p in b.online()), 10))
