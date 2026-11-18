@@ -18,21 +18,24 @@ No admin rights needed. It installs to `%LOCALAPPDATA%\Programs\Blip` and starts
 
 ## Using it
 
-- **Left-click** pat · **drag** pick up · **right-click** everything else.
+- **Left-click** pat · **drag** pick up · **right-click** for the menu (care buttons, timers, calls, settings).
 - Click a poop to clean it. Click the timer sign to open *Timers & alarms*.
+- **Settings → Pet** to pick a look (Blip, Kitty, Bunny, Bear, Pup, Chick, Bot) and a colour.
 
 ### Calls and messages (office network)
 
-Pets on the same network find each other automatically (UDP broadcast on port 47610, messages on TCP 47611).
+Pets on the same network find each other automatically, with nothing to set up
+(UDP broadcast on port 47610, messages on TCP 47611). Pets also share the addresses of pets they know,
+so if one PC can reach another floor, everyone gets introduced.
 
 - Right-click → **Call ▸ name**: their pet runs to the middle of their screen and rings.
   They answer with *Coming*, *2 min*, *Busy* or a custom reply, and your pet shows it.
 - Right-click → **Message ▸ name** for a short note. History is in **Buddies & inbox**.
 - **Do not disturb** silences calls (callers get an automatic "busy").
-- Only pets with the same **office passphrase** (Settings → Office network) can see each other.
-  Every packet is signed with it.
-- Pets on other floors/VLANs or isolated Wi-Fi can't hear broadcasts. Either list their IPs in
-  *Extra PCs*, or run a relay on any always-on machine and put `host:47620` in *Relay*:
+- By default everyone in the office who has Blip can see each other. Turn on **Settings → Office →
+  Private group** and share a group password to limit it to your team. Every packet is signed with it.
+- If colleagues on another floor or isolated Wi-Fi still don't appear, add one of their PCs' IPs under
+  *Other floors*, or run a relay on any always-on machine and put `host:47620` in *Relay*:
 
   ```
   python -m blip.relay

@@ -128,3 +128,12 @@ class RelayTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PeerSharingTests(unittest.TestCase):
+    def test_learns_only_private_ipv4(self):
+        n = Net("me", lambda: {}, "x", lambda *a: None)
+        n._learn(["10.1.2.3", "192.168.5.9", "8.8.8.8", "127.0.0.1", "not-an-ip", "fe80::1", 42])
+        self.assertEqual(n.learned, {"10.1.2.3", "192.168.5.9"})
+        n._learn("10.0.0.1")          # not a list: ignored
+        self.assertEqual(len(n.learned), 2)

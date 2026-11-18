@@ -1,4 +1,4 @@
-"""Pixel art: the pet, its props, and a 5x7 pixel font. Everything is plain data + functions."""
+"""Pixel art: the pets, their props, and a 5x7 pixel font with icons. Plain data + functions."""
 
 GW, GH = 32, 28          # pet sprite grid, in cells
 
@@ -19,7 +19,16 @@ PALETTES = {
     "plum": ("#c3a6e8", "#9a7cc8", "#7ee0c3"),
     "sick": ("#c4dc9a", "#9cba70", "#9cba70"),
     "ghost": ("#eef1ff", "#c9d0f0", "#c9d0f0"),
+    "mint": ("#9be8c8", "#6cc9a5", "#ff8fab"),
+    "peach": ("#ffc29e", "#f09a6c", "#ff6f91"),
+    "pink": ("#ffb8d6", "#ec8bb4", "#7ee0c3"),
+    "snow": ("#f6f6fb", "#d6d6e6", "#ff8fab"),
+    "cocoa": ("#d6ae86", "#ab805a", "#ffd166"),
+    "lime": ("#cdea7a", "#a3c654", "#ff8fab"),
 }
+SPECIES = {"blip": "Blip", "kitty": "Kitty", "bunny": "Bunny", "bear": "Bear", "pup": "Pup",
+           "chick": "Chick", "bot": "Bot"}
+COLORS = ["auto", "mint", "sky", "gold", "plum", "peach", "pink", "snow", "cocoa", "lime"]
 
 HEART = [(1, 0), (3, 0), (0, 1), (1, 1), (2, 1), (3, 1), (4, 1), (1, 2), (2, 2), (3, 2), (2, 3)]
 ZED = [(0, 0), (1, 0), (2, 0), (1, 1), (0, 2), (1, 2), (2, 2)]
@@ -45,10 +54,38 @@ POOP = ["...oo...",
         ".oooooo."]
 
 
-# ---------------------------------------------------------------- pet
+# ---------------------------------------------------------------- shape helpers
 def _ellipse(cx, cy, rx, ry):
     return {(x, y) for y in range(GH) for x in range(GW)
             if ((x + 0.5 - cx) / rx) ** 2 + ((y + 0.5 - cy) / ry) ** 2 <= 1.0}
+
+
+def _rrect(cx, cy, rx, ry, corner=2):
+    out = set()
+    for y in range(GH):
+        for x in range(GW):
+            dx, dy = abs(x + 0.5 - cx), abs(y + 0.5 - cy)
+            if dx <= rx and dy <= ry:
+                ex, ey = dx - (rx - corner), dy - (ry - corner)
+                if ex > 0 and ey > 0 and ex * ex + ey * ey > corner * corner:
+                    continue
+                out.add((x, y))
+    return out
+
+
+def _tri(apex_x, apex_y, base_cx, base_y, half):
+    """Cells of a triangle from an apex down to a base row centred at base_cx."""
+    out = set()
+    h = max(1, base_y - apex_y)
+    for i in range(h + 1):
+        t = i / h
+        mx = apex_x + (base_cx - apex_x) * t
+        hw = half * t
+        y = apex_y + i
+        for x in range(int(mx - hw - 2), int(mx + hw + 2)):
+            if abs(x + 0.5 - mx) <= hw + 0.5:
+                out.add((x, y))
+    return out
 
 
 def _outline(g, shape):
@@ -59,6 +96,13 @@ def _outline(g, shape):
                 g.setdefault(p, COL["out"])
 
 
+def darker(hexcol, f=0.82):
+    h = hexcol.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return "#%02x%02x%02x" % (int(r * f), int(g * f), int(b * f))
+
+
+# ---------------------------------------------------------------- egg
 def build_egg(frame, progress):
     wob = 0
     if progress > 0.8:
@@ -85,51 +129,132 @@ def build_egg(frame, progress):
     return g
 
 
-def build_pet(stage, palette, mood, frame, facing=0, squash=False, blink=False):
+# ---------------------------------------------------------------- pets
+def build_pet(stage, palette, mood, frame, facing=0, squash=False, blink=False, species="blip"):
     """Return {(x, y): colour} for the pet on a GW x GH grid, feet on the bottom row.
 
     mood: normal happy sad eat sleep sick held alert
     """
     rx, ry = {"baby": (5.0, 4.5), "child": (7.0, 6.0), "adult": (9.0, 7.5)}[stage]
+    k = {"baby": 0, "child": 1, "adult": 2}[stage]
     if squash:
         rx, ry = rx + 0.7, ry - 0.8
+    if species not in SPECIES:
+        species = "blip"
     base, shade, tip = PALETTES[palette]
     O = COL["out"]
     cx = GW / 2
     cy = (GH - 1) - ry
-    shape = _ellipse(cx, cy, rx, ry)
+    shape = _rrect(cx, cy, rx, ry, 2 + k) if species == "bot" else _ellipse(cx, cy, rx, ry)
     if palette == "ghost":  # wavy hem
         bottom = max(y for _, y in shape)
         shape = {(x, y) for x, y in shape if not (y == bottom and (x + frame) % 3 == 0)}
-    g = {p: (shade if p[1] + 0.5 > cy + ry * 0.45 else base) for p in shape}
-    hx, hy = int(cx - rx * 0.55), int(cy - ry * 0.55)
-    for p in ((hx, hy), (hx + 1, hy), (hx, hy + 1)):
-        if p in shape:
-            g[p] = COL["white"]
-    _outline(g, shape)
-
-    # antenna
     top = min(y for _, y in shape)
+    g = {p: (shade if p[1] + 0.5 > cy + ry * 0.45 else base) for p in shape}
+
+    # ears and other bits that share the outline
+    extra, inner = {}, {}
+    if species == "kitty":
+        h, half = 2 + k, 1.0 + 0.6 * k
+        for s in (-1, 1):
+            ecx = cx + s * rx * 0.55
+            for p in _tri(ecx + s * 1.0, top - h, ecx, top + 1, half):
+                extra[p] = base
+            if k:
+                for p in _tri(ecx + s * 1.0, top - h + 1, ecx, top + 1, half - 1.0):
+                    if top - h < p[1] < top + 1:
+                        inner[p] = COL["cheek"]
+        if k:  # tail
+            side = 1 if facing <= 0 else -1
+            tx = int(cx + side * rx) - (0 if side > 0 else 1)
+            for i in range(2 + k):
+                extra[(tx + side * (i // 2), GH - 3 - i)] = shade
+    elif species == "bunny":
+        length, erx = 4 + 2 * k, 1.2 + 0.4 * k
+        for s in (-1, 1):
+            droop = 0.5 if (s > 0 and frame % 8 < 4) else 0.0
+            ecx = cx + s * (max(1.6, rx * 0.35) + droop)
+            for p in _ellipse(ecx, top - length / 2 + 1, erx, length / 2):
+                extra[p] = base
+                if abs(p[0] + 0.5 - ecx) < erx * 0.5 and p[1] < top and k:
+                    inner[p] = COL["cheek"]
+    elif species == "bear":
+        r = 1.6 + 0.5 * k
+        for s in (-1, 1):
+            ecx = cx + s * rx * 0.72
+            for p in _ellipse(ecx, top + 1, r, r):
+                extra[p] = base
+                if (p[0] + 0.5 - ecx) ** 2 + (p[1] + 0.5 - top - 1) ** 2 < (r * 0.55) ** 2:
+                    inner[p] = shade
+    elif species == "pup":
+        erx, ery = 1.1 + 0.45 * k, 2.4 + 1.1 * k
+        ear_col = darker(shade, 0.85)
+        swing = 0.4 if frame % 4 in (1, 2) else 0.0
+        for s in (-1, 1):
+            ecx = cx + s * (rx * 0.78 + swing)
+            for p in _ellipse(ecx, top + ery * 0.9, erx, ery):
+                extra[p] = ear_col
+    elif species == "chick":
+        wrx, wry = 1.0 + 0.35 * k, 1.7 + 0.5 * k
+        flap = -1 if frame % 4 == 0 else 0
+        for s in (-1, 1):
+            for p in _ellipse(cx + s * (rx - 0.6), cy + ry * 0.2 + flap, wrx, wry):
+                extra[p] = shade
+    full = set(shape) | set(extra)
+    for p, c in extra.items():
+        if p not in shape or species in ("pup", "chick"):
+            g[p] = c
+    if species == "bot":
+        hx, hy = int(cx - rx + 1), int(cy - ry + 1)
+    else:
+        hx, hy = int(cx - rx * 0.55), int(cy - ry * 0.55)
+    for p in ((hx, hy), (hx + 1, hy), (hx, hy + 1)):
+        if p in shape and p not in extra:
+            g[p] = COL["white"]
+    for p, c in inner.items():
+        if p in full:
+            g[p] = c
+    _outline(g, full)
+
+    # antenna / tuft
     ax = 16 if facing > 0 else 15
     sway = (0, 1, 0, -1)[frame % 4]
-    if stage == "baby":
-        g[(ax, top - 2)] = O
-        g[(ax + 1, top - 3)] = O
-    else:
-        n = 2 if stage == "child" else 3
-        for i in range(n):
-            g[(ax + (sway if i == n - 1 else 0), top - 2 - i)] = O
-        tx, ty = ax + sway, top - 2 - n
-        tips = [(tx, ty)] if stage == "child" else [(tx, ty), (tx + 1, ty), (tx, ty - 1), (tx + 1, ty - 1)]
-        for p in tips:
-            g[p] = COL["alert"] if mood == "alert" and frame % 2 else tip
-        for x, y in tips:
-            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-                q = (x + dx, y + dy)
-                if q not in tips and 0 <= q[0] < GW and q[1] >= 0:
-                    g.setdefault(q, O)
+    if species in ("blip", "bot"):
+        if stage == "baby":
+            g[(ax, top - 2)] = O
+            g[(ax + 1, top - 3)] = O
+        else:
+            n = 2 if stage == "child" else 3
+            for i in range(n):
+                g[(ax + (sway if i == n - 1 else 0), top - 2 - i)] = O
+            tx, ty = ax + sway, top - 2 - n
+            tips = [(tx, ty)] if stage == "child" else [(tx, ty), (tx + 1, ty), (tx, ty - 1), (tx + 1, ty - 1)]
+            for p in tips:
+                g[p] = COL["alert"] if mood == "alert" and frame % 2 else tip
+            for x, y in tips:
+                for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    q = (x + dx, y + dy)
+                    if q not in tips and 0 <= q[0] < GW and q[1] >= 0:
+                        g.setdefault(q, O)
+    elif species == "chick":
+        for p in ((ax, top - 2), (ax - 1, top - 3), (ax + 1, top - 3), (ax + 1 + sway % 2, top - 4)):
+            g[p] = O
 
-    def put(cells, col=O):
+    # face
+    fc = O
+    if species == "bot":
+        fc = "#7df9ff"
+        for x in range(int(cx - rx + 2), int(cx + rx - 1)):
+            for y in range(int(cy - ry + 2 + (1 if k else 0)), int(cy + ry * 0.35) + 1):
+                if (x, y) in shape:
+                    g[(x, y)] = "#263049"
+        for s in (-1, 1):
+            bolt = (int(cx + s * rx) - (1 if s > 0 else 0), int(cy + ry * 0.55))
+            if bolt in shape:
+                g[bolt] = "#c9c9d6"
+
+    def put(cells, col=None):
+        col = col or fc
         for p in cells:
             if p in shape:
                 g[p] = col
@@ -139,7 +264,14 @@ def build_pet(stage, palette, mood, frame, facing=0, squash=False, blink=False):
     ey = int(cy - ry * 0.15)
     eh = 1 if stage == "baby" else 2
     L, R = 16 - d + f, 15 + d + f
-    big = stage == "adult"
+    big = stage == "adult" and species != "bot"
+    my = ey + eh + (1 if stage == "baby" else 2)
+    m = 15 + f
+
+    if species == "bear":   # muzzle
+        for p in _ellipse(16 + f, my + 0.8, 2.2 + 0.7 * k, 1.4 + 0.4 * k):
+            if p in shape:
+                g[p] = "#fff1df"
 
     for ex, side in ((L, -1), (R, 1)):
         if mood == "happy":
@@ -149,26 +281,39 @@ def build_pet(stage, palette, mood, frame, facing=0, squash=False, blink=False):
         elif mood == "sick":
             put([(ex - 1, ey - 1), (ex + 1, ey - 1), (ex, ey), (ex - 1, ey + 1), (ex + 1, ey + 1)])
         elif mood == "held":
-            k = -side
-            put([(ex + k, ey - 1), (ex, ey), (ex + k, ey + 1)])
+            kk = -side
+            put([(ex + kk, ey - 1), (ex, ey), (ex + kk, ey + 1)])
         elif big or mood == "alert":
             x0 = ex if side < 0 else ex - 1
             put([(x0, ey), (x0 + 1, ey), (x0, ey + 1), (x0 + 1, ey + 1)])
-            put([(x0 if side < 0 else x0 + 1, ey)], COL["white"])
+            if species != "bot":
+                put([(x0 if side < 0 else x0 + 1, ey)], COL["white"])
         else:
             put([(ex, ey + i) for i in range(eh)])
     if mood == "sad":
         put([(L, ey + eh + frame % 3)], COL["tear"])
 
-    if mood in ("normal", "happy", "eat", "alert"):
+    if mood in ("normal", "happy", "eat", "alert") and species != "bot":
         cyk = ey + eh
         put([(L - (2 if big else 1), cyk), (R + (2 if big else 1), cyk)], COL["cheek"])
 
-    my = ey + eh + (1 if stage == "baby" else 2)
-    m = 15 + f
+    if species == "chick":   # beak instead of a mouth
+        orange, dark = "#ffa53a", "#e07b1a"
+        put([(m, my), (m + 1, my)], orange)
+        if mood in ("happy", "eat", "held", "alert") and frame % 2 == 0:
+            put([(m, my + 1), (m + 1, my + 1)], COL["red"])
+            put([(m, my + 2), (m + 1, my + 2)], dark)
+        else:
+            put([(m, my + 1), (m + 1, my + 1)], dark)
+        return g
+    if species in ("pup", "bear") and stage != "baby":   # nose
+        put([(m, my - 1), (m + 1, my - 1)], O)
+        my += 1
     if mood == "happy":
         put([(m - 1, my), (m + 2, my), (m, my + 1), (m + 1, my + 1)])
-        put([(m, my), (m + 1, my)], COL["red"])
+        put([(m, my), (m + 1, my)], COL["red"] if species != "bot" else fc)
+        if species == "pup":
+            put([(m + 1, my + 2)], "#ff7a93")
     elif mood == "sad":
         put([(m - 1, my + 1), (m, my), (m + 1, my), (m + 2, my + 1)])
     elif mood == "eat":
@@ -182,8 +327,10 @@ def build_pet(stage, palette, mood, frame, facing=0, squash=False, blink=False):
         put([(m - 1, my + 1), (m, my), (m + 1, my + 1), (m + 2, my)])
     elif mood in ("held", "alert"):
         put([(m, my), (m + 1, my), (m, my + 1), (m + 1, my + 1)])
-        if mood == "alert":
+        if mood == "alert" and species != "bot":
             put([(m, my + 1), (m + 1, my + 1)], COL["red"])
+    elif species == "kitty":
+        put([(m - 1, my), (m, my + 1), (m + 1, my), (m + 2, my + 1)])
     else:
         put([(m - 1, my), (m, my + 1), (m + 1, my + 1), (m + 2, my)])
     return g
@@ -211,7 +358,6 @@ _F = {
     "%": "18 19 02 04 08 13 03", "#": "0A 0A 1F 0A 1F 0A 0A", ">": "08 04 02 01 02 04 08",
     "<": "02 04 08 10 08 04 02", "&": "0C 12 14 08 15 12 0D", "_": "00 00 00 00 00 00 1F",
     "=": "00 00 1F 00 1F 00 00", "@": "0E 11 17 15 17 10 0E",
-    # icons
     "\x01": "1F 11 0A 04 0A 11 1F",   # hourglass
     "\x02": "04 0E 0E 0E 1F 00 04",   # bell
     "\x03": "18 1C 0C 06 07 03 00",   # phone handset
@@ -221,9 +367,22 @@ _F = {
     "\x07": "00 0A 1F 1F 0E 04 00",   # heart
     "\x08": "04 15 0E 1F 0E 15 04",   # sparkle / task
 }
+_EXTRA = {
+    "meal": "0A 15 0A 00 1F 1F 0E", "snack": "0E 1B 1F 17 1F 0E 00", "play": "00 0E 17 1F 1F 1F 0E",
+    "clean": "0C 12 12 0C 00 03 03", "pill": "06 0F 1F 1E 0C 00 00", "moon": "0E 1C 18 18 18 1C 0E",
+    "gear": "04 15 0E 1B 0E 15 04", "people": "0A 0A 00 1B 1B 1B 00", "power": "04 15 15 11 11 0E 00",
+    "paw": "0A 15 00 0E 1F 1F 0E", "walk": "18 18 00 03 03 00 18", "info": "04 00 0C 04 04 0E 00",
+    "globe": "0E 15 1F 15 1F 15 0E", "dnd": "0E 11 11 1F 11 11 0E", "update": "04 04 15 0E 04 00 1F",
+    "chevron": "00 08 04 02 04 08 00", "plus": "00 04 04 1F 04 04 00", "trash": "04 1F 00 1F 15 15 0E",
+    "pause": "1B 1B 1B 1B 1B 1B 00", "playtri": "08 0C 0E 0F 0E 0C 08", "reset": "0D 13 17 10 10 11 0E",
+    "x": "11 0A 04 0A 11 00 00", "open": "0F 03 05 09 10 00 00", "user": "0E 0E 0E 00 1F 1F 1F",
+}
+for _i, (_n, _v) in enumerate(_EXTRA.items()):
+    _F[chr(0xE000 + _i)] = _v
 FONT = {k: [int(b, 16) for b in v.split()] for k, v in _F.items()}
 ICON = {"hourglass": "\x01", "bell": "\x02", "phone": "\x03", "mail": "\x04", "check": "\x05",
         "stopwatch": "\x06", "heart": "\x07", "task": "\x08"}
+ICON.update({_n: chr(0xE000 + _i) for _i, _n in enumerate(_EXTRA)})
 
 
 def glyph(ch):
@@ -234,8 +393,7 @@ def text_cells(text):
     """[(x, y)] cells for text, 6 cells per char (5 + gap), 7 rows."""
     out = []
     for i, ch in enumerate(text):
-        rows = glyph(ch)
-        for y, bits in enumerate(rows):
+        for y, bits in enumerate(glyph(ch)):
             for x in range(5):
                 if bits & (0x10 >> x):
                     out.append((i * 6 + x, y))
@@ -252,3 +410,10 @@ def draw_text(canvas, x, y, text, px, color, tags=()):
         canvas.create_rectangle(x + cx * px, y + cy * px, x + (cx + 1) * px, y + (cy + 1) * px,
                                 fill=color, width=0, tags=tags)
     return text_width(text, px)
+
+
+def draw_sprite(canvas, g, x, y, px, tags=()):
+    """Draw a sprite dict with cell (0, 0) at (x, y)."""
+    for (cx, cy), c in g.items():
+        canvas.create_rectangle(x + cx * px, y + cy * px, x + (cx + 1) * px, y + (cy + 1) * px,
+                                fill=c, width=0, tags=tags)

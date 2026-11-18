@@ -12,13 +12,16 @@ from blip.sprites import FONT, ICON, PALETTES, build_egg, build_pet, text_cells
 
 
 class SpriteTests(unittest.TestCase):
-    def test_all_moods_build(self):
-        for stage in ("baby", "child", "adult"):
-            for pal in PALETTES:
-                for mood in ("normal", "happy", "sad", "eat", "sleep", "sick", "held", "alert"):
-                    for f in range(4):
-                        g = build_pet(stage, pal, mood, f, facing=f % 3 - 1, squash=f % 2 == 0)
-                        self.assertTrue(g)
+    def test_all_species_moods_build(self):
+        from blip.sprites import GH, GW, SPECIES
+        for sp in SPECIES:
+            for stage in ("baby", "child", "adult"):
+                for pal in PALETTES:
+                    for mood in ("normal", "happy", "sad", "eat", "sleep", "sick", "held", "alert"):
+                        for f in range(4):
+                            g = build_pet(stage, pal, mood, f, facing=f % 3 - 1, squash=f % 2 == 0, species=sp)
+                            self.assertTrue(g)
+                            self.assertTrue(all(0 <= x < GW and -4 <= y < GH for x, y in g), (sp, stage, mood))
         self.assertTrue(build_egg(3, 0.9))
 
     def test_font_covers_ui_text(self):

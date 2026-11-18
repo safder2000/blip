@@ -15,12 +15,14 @@ from .basecamp import Basecamp
 from .config import Config, data_dir, frozen, read_json, write_json
 from .net import Net
 from .sound import Sound
-from .sprites import (BANG, COL, FOOD, GH, GW, HEART, ICON, NOTE, POOP, SPARK, ZED, build_egg, build_pet,
-                      draw_text, text_width)
+from .sprites import (BANG, COL, FOOD, GH, GW, HEART, ICON, NOTE, PALETTES, POOP, SPARK, SPECIES, ZED, build_egg,
+                      build_pet, draw_text, text_width)
 from .timers import Timers, describe_days, fmt_clock, parse_clock, parse_duration
 from .ui import KEY, CardStack, pixel_box
+from . import kit
 from . import updater as upd
 from . import windows as W
+from .menu import PopMenu
 
 FAST = 60.0 if "--fast" in sys.argv else 1.0
 HOUR = 3600.0
@@ -91,7 +93,8 @@ def fresh_state(gen=1, name="Blip"):
             "stats": {"full": 80.0, "happy": 80.0, "energy": 90.0, "hygiene": 100.0, "health": 100.0},
             "sick": False, "asleep": False, "poops": [], "next_poop": None, "snacks": 0.0,
             "care_good": 0.0, "care_total": 0.0, "gone": False, "x": None,
-            "wander": True, "wall": time.time(), "bc_seen": {}, "bc_summary_day": ""}
+            "wander": True, "wall": time.time(), "bc_seen": {}, "bc_summary_day": "",
+            "species": "blip", "color": "auto"}
 
 
 def load_state(path):
@@ -128,7 +131,9 @@ class App:
         self.root = root = tk.Tk()
         root.report_callback_exception = self._on_error
         root.title("Blip")
+        kit.init(root)
         W.style(root)
+        self.menu = None
         S = self.S = root.winfo_fpixels("1i") / 96.0
         self.P = max(3, round(4 * S))
         self.bub_h = round(48 * S)
@@ -160,6 +165,7 @@ class App:
         self.windows = {}
         self.bc_snooze_until = 0.0
         self.last_bc_nag = time.monotonic()
+        self.refresh_icon()
 
         self.frame = 0
         self.action, self.action_until = "idle", 0.0
@@ -281,7 +287,28 @@ class App:
             return "ghost"
         if st["sick"]:
             return "sick"
+        if st.get("color", "auto") != "auto" and st.get("color") in PALETTES:
+            return st["color"]
         return {"baby": "baby", "child": "child"}.get(st["stage"], st["palette"])
+
+    def species(self):
+        return self.st.get("species") if self.st.get("species") in SPECIES else "blip"
+
+    def mood_word(self):
+        st, s = self.st, self.st["stats"]
+        if st["gone"]:
+            return "on the pet planet"
+        if st["stage"] == "egg":
+            return "still an egg"
+        if st["asleep"]:
+            return "sleeping"
+        if st["sick"]:
+            return "feeling sick"
+        low = min(("hungry", s["full"]), ("bored", s["happy"]), ("tired", s["energy"]), ("messy", s["hygiene"]),
+                  key=lambda kv: kv[1])
+        if low[1] < 25:
+            return low[0]
+        return "happy" if s["happy"] > 60 else "okay"
 
     def mood(self):
         st, a = self.st, self.action
@@ -883,7 +910,28 @@ class App:
     # ------------------------------------------------ office network
     def profile(self):
         return {"name": self.cfg["display_name"], "status": "busy" if self.cfg["dnd"] else "available",
-                "stage": self.st["stage"], "palette": self.palette(), "ver": __version__}
+                "stage": self.st["stage"], "palette": self.palette(), "species": self.species(),
+                "ver": __version__}
+
+    def refresh_icon(self):
+        """Window icons show the current pet."""
+        try:
+            pal = self.palette() if self.palette() in PALETTES else "gold"
+            self._icon = kit.pet_photo(self.root, self.species(), pal, 32)
+            self._icon_big = kit.pet_photo(self.root, self.species(), pal, 64)
+            self.root.iconphoto(True, self._icon_big, self._icon)
+        except tk.TclError:
+            pass
+
+    def set_look(self, species=None, color=None):
+        if species:
+            self.st["species"] = species
+        if color:
+            self.st["color"] = color
+        self.refresh_icon()
+        self.draw()
+        self.net_rescan()
+        self.save()
 
     def start_net(self):
         self.net_error = None
@@ -1227,7 +1275,7 @@ class App:
             squash = squash or self.land > 0
             mood = self.mood()
             blink = mood in ("normal", "sad") and random.random() < 0.08
-            g = build_pet(st["stage"], self.palette(), mood, self.frame, facing, squash, blink)
+            g = build_pet(st["stage"], self.palette(), mood, self.frame, facing, squash, blink, self.species())
         self.top_row = min(y for _, y in g)
 
         if self.food and self.action == "eat":
@@ -1301,6 +1349,8 @@ class App:
 
     # ------------------------------------------------ input
     def on_press(self, e):
+        if self.menu:
+            self.menu.close()
         if "sign" in self.cv.gettags("current"):
             self.drag = None
             self.open_window("timers")
@@ -1345,78 +1395,98 @@ class App:
             self.pat()
 
     def on_menu(self, e):
-        st = self.st
+        if self.menu:
+            self.menu.close()
+        st, s = self.st, self.st["stats"]
         alive = not st["gone"]
         hatched = self.hatched()
-        on = lambda ok: "normal" if ok else "disabled"  # noqa: E731
-        m = tk.Menu(self.root, tearoff=0)
-        care = tk.Menu(m, tearoff=0)
-        care.add_command(label="Feed meal", command=lambda: self.feed("meal"), state=on(hatched))
-        care.add_command(label="Give snack", command=lambda: self.feed("snack"), state=on(hatched))
-        care.add_command(label="Play", command=self.play, state=on(hatched))
         n = len(st["poops"])
-        care.add_command(label="Clean up" + (f" ({n})" if n else ""), command=self.clean, state=on(alive))
-        care.add_command(label="Medicine", command=self.medicine, state=on(hatched))
-        care.add_command(label="Wake up" if st["asleep"] else "Put to sleep", command=self.toggle_sleep,
-                         state=on(hatched))
-        care.add_separator()
-        care.add_command(label="Pet status…", command=lambda: self.open_window("status"))
-        care.add_command(label="Rename…", command=self.rename, state=on(alive))
-        if st["gone"]:
-            care.add_command(label="Hatch a new egg", command=self.new_egg)
-        m.add_cascade(label=f"Care for {st['name']}", menu=care)
-        m.add_separator()
+        header = {
+            "name": st["name"], "species": self.species(), "palette": self.palette(),
+            "stage": "egg" if st["stage"] == "egg" and not st["gone"] else (st["stage"] if st["stage"] != "egg" else "baby"),
+            "mood": self.mood() if self.mood() in ("happy", "sad", "sleep", "sick") else "normal",
+            "status": f"{STAGE_NAMES.get(st['stage'], '')}  \u00b7  {self.mood_word()}",
+            "bars": [("meal", s["full"], "#f0a020"), ("play", s["happy"], "#ef5b8b"), ("moon", s["energy"], "#6b7fd7")],
+            "command": lambda: self.open_window("settings", "pet"),
+        }
+        actions = [
+            ("meal", "Feed a meal", lambda: self.feed("meal"), hatched, "Feed"),
+            ("snack", "Give a snack", lambda: self.feed("snack"), hatched, "Snack"),
+            ("play", "Play", self.play, hatched, "Play"),
+            ("clean", "Clean up", self.clean, alive, f"Clean ({n})" if n else "Clean"),
+            ("pill", "Medicine", self.medicine, hatched, "Meds"),
+            ("moon", "Sleep", self.toggle_sleep, hatched, "Wake" if st["asleep"] else "Sleep"),
+        ]
 
-        tm = tk.Menu(m, tearoff=0)
-        for mins in (1, 5, 10, 15, 25, 30, 45, 60):
-            tm.add_command(label=f"{mins} min", command=lambda s=mins * 60: self.start_timer(s))
-        tm.add_command(label="Other…", command=self.ask_timer)
-        m.add_cascade(label="Timer", menu=tm)
-        m.add_command(label="Stopwatch", command=self.start_stopwatch)
-        m.add_command(label="Alarm…", command=self.ask_alarm)
-        m.add_command(label="Timers & alarms…", command=lambda: self.open_window("timers"))
-        m.add_separator()
+        def timer_menu():
+            items = [{"label": f"{m} minutes" if m > 1 else "1 minute", "icon": "hourglass",
+                      "command": (lambda sec=m * 60: self.start_timer(sec))} for m in (1, 5, 10, 15, 25, 30, 45, 60)]
+            return items + [{"sep": True}, {"label": "Other\u2026", "icon": "plus", "command": self.ask_timer}]
 
-        peers = self.net.online() if self.net else []
-        call_m, msg_m = tk.Menu(m, tearoff=0), tk.Menu(m, tearoff=0)
-        for p in peers:
-            label = p.get("name", "?") + ("  (dnd)" if p.get("status") == "busy" else "")
-            call_m.add_command(label=label, command=lambda pid=p["id"]: self.call(pid))
-            msg_m.add_command(label=label, command=lambda pid=p["id"]: self.compose(pid))
-        if not peers:
-            call_m.add_command(label="(nobody nearby yet)", state="disabled")
-            msg_m.add_command(label="(nobody nearby yet)", state="disabled")
-        m.add_cascade(label="Call", menu=call_m)
-        m.add_cascade(label="Message", menu=msg_m)
-        m.add_command(label="Buddies & inbox…", command=lambda: self.open_window("buddies"))
-        self.var_dnd.set(self.cfg["dnd"])
-        m.add_checkbutton(label="Do not disturb", variable=self.var_dnd, command=lambda: self.set_dnd(self.var_dnd.get()))
-        m.add_separator()
+        def people_menu(kind):
+            peers = self.net.online() if self.net else []
+            out = []
+            for p in peers:
+                busy = p.get("status") == "busy"
+                out.append({"label": p.get("name", "?"), "icon": "phone" if kind == "call" else "mail",
+                            "hint": "busy" if busy else "",
+                            "command": (lambda pid=p["id"]: self.call(pid)) if kind == "call"
+                            else (lambda pid=p["id"]: self.compose(pid))})
+            if not out:
+                out = [{"label": "Nobody nearby yet", "enabled": False},
+                       {"label": "Look again", "icon": "reset", "command": self.net_rescan}]
+            return out
 
+        nearby = len(self.net.online()) if self.net else 0
         due = len(self.bc.items)
-        m.add_command(label="Basecamp tasks" + (f" ({due})" if due else "") + "…",
-                      command=lambda: self.open_window("tasks"))
-        m.add_separator()
-        self.var_wander.set(st["wander"])
-        m.add_checkbutton(label="Wander around", variable=self.var_wander, command=self.toggle_wander)
-        m.add_command(label="Settings…", command=lambda: self.open_window("settings"))
-        m.add_command(label="Check for updates", command=lambda: self.check_updates(manual=True))
-        m.add_command(label="Quit", command=self.quit)
-        try:
-            m.tk_popup(e.x_root, e.y_root)
-        finally:
-            m.grab_release()
+        items = [
+            {"section": "Focus"},
+            {"label": "Timer", "icon": "hourglass", "submenu": timer_menu},
+            {"label": "Stopwatch", "icon": "stopwatch", "command": self.start_stopwatch},
+            {"label": "Alarm\u2026", "icon": "bell", "command": self.ask_alarm},
+            {"label": "Timers & alarms", "icon": "gear", "command": lambda: self.open_window("timers"),
+             "hint": str(self.timers.active_count() or "")},
+            {"section": "Office"},
+            {"label": "Call", "icon": "phone", "submenu": lambda: people_menu("call"),
+             "hint": str(nearby or "")},
+            {"label": "Message", "icon": "mail", "submenu": lambda: people_menu("msg")},
+            {"label": "Buddies & inbox", "icon": "people", "command": lambda: self.open_window("buddies")},
+            {"label": "Basecamp tasks", "icon": "task", "command": lambda: self.open_window("tasks"),
+             "hint": str(due or "")},
+            {"label": "Do not disturb", "icon": "dnd", "check": bool(self.cfg["dnd"]),
+             "command": lambda: self.set_dnd(not self.cfg["dnd"])},
+            {"sep": True},
+            {"label": "Wander around", "icon": "walk", "check": bool(st["wander"]),
+             "command": lambda: self.set_wander(not self.st["wander"])},
+            {"label": "Settings", "icon": "gear", "command": lambda: self.open_window("settings")},
+        ]
+        if st["gone"]:
+            items.append({"label": "Hatch a new egg", "icon": "heart", "command": self.new_egg})
+        items.append({"label": "Quit Blip", "icon": "power", "command": self.quit})
+        self.menu = PopMenu(self, items, e.x_root + 4, e.y_root - 20, header=header, actions=actions)
 
-    def open_window(self, name):
+    def set_wander(self, on):
+        self.st["wander"] = bool(on)
+        self.var_wander.set(self.st["wander"])
+        if not on and self.action == "walk":
+            self.set_action("idle", 3)
+
+    def open_window(self, name, page=None):
+        if name == "status":
+            name, page = "settings", "pet"
         w = self.windows.get(name)
         if w and w.alive():
             w.top.deiconify()
             w.top.lift()
             w.top.focus_force()
+            if page and hasattr(w, "show"):
+                w.show(page)
             return w
         cls = {"timers": W.TimersWindow, "buddies": W.BuddiesWindow, "tasks": W.TasksWindow,
-               "settings": W.SettingsWindow, "status": W.StatusWindow}[name]
+               "settings": W.SettingsWindow}[name]
         self.windows[name] = w = cls(self)
+        if page and hasattr(w, "show"):
+            w.show(page)
         if name == "tasks" and self.bc.connected:
             self.bc.refresh()
         return w

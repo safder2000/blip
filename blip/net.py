@@ -7,6 +7,7 @@ peer IPs directly.
 """
 import hashlib
 import hmac
+import ipaddress
 import json
 import socket
 import threading
@@ -20,6 +21,8 @@ MAX_FRAME = 32 * 1024
 HELLO_EVERY = 15
 OFFLINE_AFTER = 50
 MAX_SKEW = 600
+MAX_SHARED = 64
+DEFAULT_GROUP = "blip-office"
 
 
 def key_from_passphrase(passphrase):
@@ -86,6 +89,7 @@ class Net:
         self.relay_addr = relay.strip()
         self.manual = [p.strip() for p in manual_peers if p.strip()]
         self.peers = {}
+        self.learned = set()           # IPs other pets told us about
         self.lock = threading.Lock()
         self.nonces = {}
         self.running = False
@@ -146,7 +150,24 @@ class Net:
     def _hello(self, to=None):
         body = dict(self.profile())
         body["port"] = self.tcp_port
+        with self.lock:   # share who we can see, so pets on other subnets get introduced
+            body["peers"] = sorted({p["ip"] for p in self.peers.values()
+                                    if p.get("via") == "lan" and p.get("ip")})[:MAX_SHARED]
         return self._env("hello", to, body)
+
+    def _learn(self, ips):
+        mine = set(local_ips())
+        for ip in ips if isinstance(ips, list) else []:
+            try:
+                a = ipaddress.ip_address(str(ip))
+            except ValueError:
+                continue
+            if a.version != 4 or not a.is_private or a.is_loopback or str(a) in mine:
+                continue
+            with self.lock:
+                if str(a) not in self.learned and len(self.learned) < 256:
+                    self.learned.add(str(a))
+                    self.wake.set()
 
     def _accept(self, d):
         if not isinstance(d, dict) or not check(self.key, d):
@@ -182,7 +203,9 @@ class Net:
                         p["ip"] = ip
                 p.update(name=str(body.get("name", "?"))[:24], status=body.get("status", "available"),
                          stage=body.get("stage"), palette=body.get("palette"), ver=body.get("ver"),
-                         port=int(body.get("port") or TCP_PORT), seen=time.time())
+                         port=int(body.get("port") or TCP_PORT), seen=time.time(),
+                         species=body.get("species"))
+            self._learn(body.get("peers"))
             if new and d.get("to") is None:
                 reply = self._hello(to=src)
                 if via == "lan" and ip:
@@ -245,7 +268,9 @@ class Net:
             pass
 
     def _send_udp_all(self, env):
-        for a in broadcast_addrs() + self.manual:
+        with self.lock:   # broadcast, plus direct hellos to every pet we know of (reaches other subnets)
+            direct = self.learned | {p["ip"] for p in self.peers.values() if p.get("via") == "lan" and p.get("ip")}
+        for a in broadcast_addrs() + sorted(set(self.manual) | direct):
             self._send_udp(env, a)
 
     # ------------------------------------------------ loops
