@@ -14,6 +14,8 @@ import urllib.parse
 import urllib.request
 import webbrowser
 
+from .plat import ssl_context
+
 UA = "Blip desktop pet (https://github.com/safder2000/blip)"
 LAUNCHPAD = "https://launchpad.37signals.com"
 API_AUTH = "https://3.basecampapi.com/authorization.json"
@@ -44,7 +46,7 @@ def api(method, url, token=None, form=None, retries=2, timeout=20):
     for attempt in range(retries + 1):
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as r:
+            with urllib.request.urlopen(req, timeout=timeout, context=ssl_context()) as r:
                 body = r.read()
                 return r.status, (json.loads(body) if body.strip() else None)
         except urllib.error.HTTPError as e:

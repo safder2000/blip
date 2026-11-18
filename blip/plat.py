@@ -257,3 +257,23 @@ def system_dark():
     except Exception:
         pass
     return True
+
+
+_SSL = None
+
+
+def ssl_context():
+    """HTTPS context that works inside the packaged app. The Mac bundle's OpenSSL looks for
+    certificates where the build machine kept them, so use certifi's list there."""
+    global _SSL
+    if _SSL is None:
+        import ssl
+        ctx = ssl.create_default_context()
+        try:
+            import certifi
+            if MAC or getattr(sys, "frozen", False):
+                ctx.load_verify_locations(certifi.where())
+        except Exception:
+            pass
+        _SSL = ctx
+    return _SSL

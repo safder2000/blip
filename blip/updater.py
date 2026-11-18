@@ -13,6 +13,8 @@ import sys
 import tempfile
 import threading
 import urllib.request
+
+from .plat import ssl_context
 from pathlib import Path
 
 REPO = "safder2000/blip"
@@ -31,7 +33,7 @@ def is_newer(remote, local):
 
 def _get(url, accept="application/vnd.github+json", timeout=30):
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": accept})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    with urllib.request.urlopen(req, timeout=timeout, context=ssl_context()) as r:
         return r.read()
 
 

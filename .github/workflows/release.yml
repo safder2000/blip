@@ -83,7 +83,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install build tools
-        run: python -m pip install --upgrade pip pyinstaller==6.11.1 pillow==11.0.0 sounddevice==0.5.1
+        run: python -m pip install --upgrade pip pyinstaller==6.11.1 pillow==11.0.0 sounddevice==0.5.1 certifi==2024.8.30
 
       - name: Stamp version
         env:
@@ -112,6 +112,10 @@ jobs:
           sleep 12
           if ! kill -0 $pid 2>/dev/null; then echo "Blip.app exited early"; exit 1; fi
           kill $pid
+          # HTTPS must work from inside the bundle (updates, Basecamp) without the build machine's Python
+          sudo mv /Library/Frameworks/Python.framework /tmp/pyfw-hidden 2>/dev/null || true
+          ./dist/Blip.app/Contents/MacOS/Blip --selftest-https
+          sudo mv /tmp/pyfw-hidden /Library/Frameworks/Python.framework 2>/dev/null || true
           if [ -f "$HOME/Library/Application Support/Blip/error.log" ]; then cat "$HOME/Library/Application Support/Blip/error.log"; exit 1; fi
 
       - name: Upload to the release
