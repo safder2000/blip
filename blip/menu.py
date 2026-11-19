@@ -1,5 +1,6 @@
 """The right-click menu: a pixel-styled pop-up with the pet in the header, one-tap care
 buttons, sections, toggles and fly-out submenus."""
+import sys
 import time
 import tkinter as tk
 
@@ -48,6 +49,7 @@ class PopMenu:
         self.hover_since = 0.0
         self.closed = False
         self.had_focus = False
+        self.away_since = None
         self.t0 = time.monotonic()
         self.win = make_overlay(app.root)
         cv = self.cv = tk.Canvas(self.win, width=W + 2 * p, height=10, bg=KEY, highlightthickness=0, bd=0)
@@ -486,15 +488,44 @@ class PopMenu:
             f = None
         if f is not None:
             self.had_focus = True
-        elif self.had_focus or time.monotonic() - self.t0 > 1.5:
+        elif self.had_focus:
+            self.close()                       # the user clicked into another app
+            return
+        elif sys.platform == "darwin":
+            # Borderless windows often never get keyboard focus on macOS, so focus can't tell us
+            # the user moved on. Close once the pointer has been away from the menu for a while.
+            if self._pointer_inside():
+                self.away_since = None
+            elif self.away_since is None:
+                self.away_since = time.monotonic()
+            elif time.monotonic() - self.away_since > 3.0 and time.monotonic() - self.t0 > 1.0:
+                self.close()
+                return
+        elif time.monotonic() - self.t0 > 1.5:
             self.close()
             return
-        else:
+        if f is None:
             try:
                 self.win.focus_force()
             except tk.TclError:
                 pass
         self.win.after(150, self._watch)
+
+    def _pointer_inside(self):
+        try:
+            px, py = self.win.winfo_pointerxy()
+        except tk.TclError:
+            return False
+        m = self
+        while m:
+            try:
+                x, y = m.win.winfo_rootx(), m.win.winfo_rooty()
+                if x - 12 <= px <= x + m.win.winfo_width() + 12 and y - 12 <= py <= y + m.win.winfo_height() + 12:
+                    return True
+            except tk.TclError:
+                pass
+            m = m.child
+        return False
 
     def close_self(self):
         if self.closed:

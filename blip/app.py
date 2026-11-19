@@ -219,6 +219,9 @@ class App:
         cv.bind("<B1-Motion>", self.on_drag)
         cv.bind("<ButtonRelease-1>", self.on_release)
         cv.bind("<Button-3>", self.on_menu)
+        if plat.MAC:      # Tk on macOS reports the right button as 2; Control-click is the Mac right-click too
+            cv.bind("<Button-2>", self.on_menu)
+            cv.bind("<Control-Button-1>", lambda e: (self.on_menu(e), "break")[1])
 
         for px in self.st["poops"]:
             self._poop_window(px)

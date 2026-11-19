@@ -113,6 +113,30 @@ class WindowTests(unittest.TestCase):
         self.assertTrue(a.windows["buddies"].alive())
         a.windows["buddies"].close()
 
+    def test_mac_menu_stays_open_without_focus_until_pointer_leaves(self):
+        from unittest import mock
+        from blip import menu as M
+        a = self.app
+
+        class E:
+            x_root, y_root = 400, 300
+        a.on_menu(E())
+        a.root.update()
+        m = a.menu
+        m.t0 -= 5                                  # well past the old 1.5 s cut-off
+        inside = (m.win.winfo_rootx() + 20, m.win.winfo_rooty() + 20)
+        with mock.patch.object(M.sys, "platform", "darwin"),                 mock.patch.object(a.root, "focus_get", return_value=None),                 mock.patch.object(m.win, "focus_force"):
+            with mock.patch.object(m.win, "winfo_pointerxy", return_value=inside):
+                m._watch()
+                self.assertFalse(m.closed)         # no focus on a Mac is normal: stay open
+            with mock.patch.object(m.win, "winfo_pointerxy", return_value=(5, 5)):
+                m._watch()
+                self.assertFalse(m.closed)         # just left: give it a moment
+                m.away_since -= 4
+                m._watch()
+                self.assertTrue(m.closed)          # away for a while: close
+        a.menu = None
+
     def test_menu_tools_row(self):
         a = self.app
         ran = []
