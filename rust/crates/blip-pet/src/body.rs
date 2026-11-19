@@ -5,7 +5,9 @@
 
 use crate::sprites::{self, Color, Sprite, GH, GW};
 
-pub const STEP: f64 = 0.030; // seconds per physics step
+/// seconds per physics step: the Python app asked Tk for 30 ms, which really ran every ~35 ms
+/// on Windows; this keeps walking, falling and throws at the speed people are used to
+pub const STEP: f64 = 0.035;
 pub const ANIM: f64 = 0.250; // seconds per animation frame
 const HOLD: f64 = 0.55; // press and hold this long (without moving) for the menu
 const BALL_SPEED: f64 = 14.0; // px per step (at 100%) that turns a throw into a ball
@@ -89,6 +91,8 @@ pub struct Body {
     /// screen scale, for jump height
     pub scale_hint: f64,
     pub happy_until: f64,
+    /// eyes closed this animation frame (rolled 4 times a second, not every drawn frame)
+    pub blink: bool,
     /// where to dash to while ringing
     pub ring_target: Option<f64>,
     /// sideways shake while ringing, for drawing
@@ -134,6 +138,7 @@ impl Body {
             slow: false,
             scale_hint: 1.0,
             happy_until: 0.0,
+            blink: false,
             ring_target: None,
             jitter: 0.0,
             phase: 0.0,
@@ -360,6 +365,7 @@ impl Body {
     pub fn anim(&mut self, now: f64) {
         self.frame = self.frame.wrapping_add(1);
         self.land = self.land.saturating_sub(1);
+        self.blink = self.random() < 0.08;
         match self.action {
             Action::Unfold if now >= self.action_until => {
                 self.set(Action::Idle, 1.5, now);
@@ -511,7 +517,7 @@ impl Body {
                 Action::Sleep => self.frame % 8 < 4,
                 _ => self.frame % 6 == 0,
             };
-        let blink = (mood == "normal" || mood == "sad") && self.random() < 0.08;
+        let blink = (mood == "normal" || mood == "sad") && self.blink;
         let mut g = sprites::build_pet(&sprites::PetLook {
             stage: look.stage,
             palette: &look.palette,

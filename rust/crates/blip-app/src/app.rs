@@ -426,7 +426,9 @@ impl App {
                 }
             } else {
                 self.pressed = false;
-                match self.body.release(&self.geo, t) {
+                let g = self.body.release(&self.geo, t);
+                crate::log(&format!("pet release -> {g:?}"));
+                match g {
                     Some(Gesture::Pat) => {
                         if self.alerts.is_empty() {
                             self.pet.pat(blip_core::now());
@@ -933,6 +935,7 @@ impl App {
             WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
             WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. } => {
                 let (mx, my) = platform::cursor();
+                crate::log(&format!("pet left press at {mx},{my} body {},{} action {:?}", self.body.x, self.body.y, self.body.action));
                 if self.modifiers.control_key() && cfg!(target_os = "macos") {
                     self.open_menu(el, mx, my); // Control-click = right-click on a Mac
                     return;

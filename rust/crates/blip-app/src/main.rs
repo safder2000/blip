@@ -49,6 +49,9 @@ impl ApplicationHandler for Runner {
 
     fn window_event(&mut self, el: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         let Some(a) = self.app.as_mut() else { return };
+        if std::env::var_os("BLIP_LOG_EVENTS").is_some() && !matches!(event, WindowEvent::RedrawRequested) {
+            log(&format!("event {id:?} {event:?}"));
+        }
         if self.wins.owns(id) {
             self.wins.event(a, el, id, event);
         } else {
@@ -142,7 +145,8 @@ fn selftest(arg: &str) -> Option<i32> {
             Some(if ok { 0 } else { 1 })
         }
         "--selftest-https" => {
-            let ok = http::get_json("https://api.github.com/repos/safder2000/blip", None, "application/vnd.github+json").is_ok();
+            // any HTTP answer proves TLS works (GitHub may rate-limit CI machines with 403)
+            let ok = !matches!(http::get_json("https://github.com/safder2000/blip", None, "text/html"), Err(http::Fail::Transport(_)));
             println!("https {}", if ok { "ok" } else { "FAILED" });
             Some(if ok { 0 } else { 1 })
         }
