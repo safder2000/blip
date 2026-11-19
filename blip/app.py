@@ -18,6 +18,7 @@ from .sprites import build_ball
 from .sprites import (BANG, COL, COLORS, FOOD, GH, GW, HEART, ICON, NOTE, PALETTES, POOP, SPARK, SPECIES, ZED,
                       build_egg, build_pet, draw_text, text_width)
 from .timers import Timers, describe_days, fmt_clock, parse_clock, parse_duration
+from .notes import Notes, describe_when, parse_when
 from .ui import KEY, CardStack, pixel_box
 from . import kit
 from . import updater as upd
@@ -138,7 +139,9 @@ class App:
         W.style(root)
         self.update_state = None
         self.menu = None
-        S = self.S = plat.ui_scale(root)
+        st0 = read_json(self.data / "state.json", {}) or {}
+        sx = st0.get("x") if isinstance(st0.get("x"), (int, float)) else 10
+        S = self.S = plat.use_scale(root, sx + 100, root.winfo_screenheight() - 60 if sx == 10 else 400)
         self.P = max(3, round(4 * S))
         self.bub_h = round(48 * S)
         self.W = max(GW * self.P, round(200 * S))
@@ -159,6 +162,7 @@ class App:
         self.st = load_state(self.state_path)
         self.surprise_look()
         self.timers = Timers(self.data / "timers.json")
+        self.notes = Notes(self.data / "notes.json")
         self.inbox = read_json(self.data / "inbox.json", [])
         self.sound = Sound(self.data, lambda: self.cfg["sound"], lambda: self.cfg.get("volume", 60))
         self.cards = CardStack(self)
@@ -638,6 +642,8 @@ class App:
             self.work = work_area_at(self.root, self.x + self.W / 2, self.y + self.H - 2)
         for it in self.timers.tick(now):
             self.timer_fired(it)
+        for n in self.notes.due(now):
+            self.reminder_fired(n)
         self.nag()
         if self.tray and self.frame % 40 < 4:
             n = len(self.net.online()) if self.net else 0
@@ -1054,6 +1060,42 @@ class App:
             self.board("Try 25 or 1:30")
             return
         self.add_alarm(hm[0], hm[1], [])
+
+    # ------------------------------------------------ notes & reminders
+    def quick_reminder(self):
+        got = W.ask_reminder(self)
+        if not got:
+            return
+        text, ts = got
+        self.notes.add(text, ts)
+        self.board("Reminder " + describe_when(ts) if ts else "Noted!", 4)
+        self.chirp("happy", "note")
+        w = self.windows.get("notes")
+        if w and w.alive():
+            w.refresh()
+
+    def reminder_fired(self, n):
+        key = f"note:{n['id']}"
+        nid = n["id"]
+
+        def done():
+            self.notes.complete(nid)
+            self._notes_changed()
+
+        def snooze(mins):
+            self.notes.snooze(nid, mins)
+            self._notes_changed()
+        self.start_alert(key, "alarm")
+        self.board("Reminder!", 6)
+        self.cards.show("Reminder", n["text"], [("Done", done), ("10 min", lambda: snooze(10)),
+                                                 ("1 hour", lambda: snooze(60))],
+                        kind="task", icon="bell", key=key, timeout=300, on_close=lambda why: self.stop_alert(key))
+        self._notes_changed()
+
+    def _notes_changed(self):
+        w = self.windows.get("notes")
+        if w and w.alive():
+            w.refresh()
 
     def timer_fired(self, it):
         key = f"tm:{it['id']}"
@@ -1872,12 +1914,17 @@ class App:
         peers = sorted(self.net.online() if self.net else [], key=lambda p: (p.get("status") == "busy",
                                                                              (p.get("name") or "").lower()))
         due = len(self.bc.items)
+        pending = len(self.notes.pending())
+        open_notes = sum(1 for n in self.notes.items if not n.get("done"))
         items = [
-            {"section": "Focus"},
-            {"label": "Timer", "icon": "hourglass", "submenu": timer_menu,
-             "hint": f"{n_active} on" if n_active else ""},
-            {"label": "Stopwatch", "icon": "stopwatch", "command": self.start_stopwatch},
-            {"label": "Alarm…", "icon": "bell", "command": self.ask_alarm},
+            {"section": "Notes"},
+            {"label": "Remind me…", "icon": "bell", "command": self.quick_reminder},
+            {"label": "Notes & reminders", "icon": "note", "command": lambda: self.open_window("notes"),
+             "hint": f"{pending} set" if pending else (str(open_notes) if open_notes else "")},
+            {"tools": [{"icon": "hourglass", "label": "Timer", "submenu": timer_menu,
+                        "badge": str(n_active) if n_active else ""},
+                       {"icon": "bell", "label": "Alarm", "command": self.ask_alarm},
+                       {"icon": "stopwatch", "label": "Stopwatch", "command": self.start_stopwatch}]},
             {"section": f"Office - {len(peers)} nearby" if peers else "Office"},
         ]
         SHOW = 5
@@ -1886,7 +1933,7 @@ class App:
             items.append({"person": p, "label": p.get("name", "?"),
                           "command": (lambda pid=pid: self.compose(pid)),
                           "buttons": [("phone", (lambda pid=pid: self.call(pid)), True, "Call"),
-                                      ("mail", (lambda pid=pid: self.compose(pid)), True, "Message")]})
+                                      ("chat", (lambda pid=pid: self.compose(pid)), True, "Message")]})
         if not peers:
             items.append({"label": "Nobody nearby yet · look again", "icon": "reset", "command": self.net_rescan})
         items += [
@@ -1926,6 +1973,7 @@ class App:
                 w.show(page)
             return w
         cls = {"timers": W.TimersWindow, "buddies": W.BuddiesWindow, "tasks": W.TasksWindow,
+               "notes": W.NotesWindow,
                "settings": W.SettingsWindow, "welcome": W.WelcomeWindow}[name]
         self.windows[name] = w = cls(self)
         if page and hasattr(w, "show"):

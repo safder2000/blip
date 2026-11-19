@@ -24,7 +24,7 @@ class WindowTests(unittest.TestCase):
 
     def open_all(self):
         a = self.app
-        for name in ("timers", "buddies", "tasks", "welcome", "settings"):
+        for name in ("timers", "buddies", "tasks", "welcome", "settings", "notes"):
             w = a.open_window(name)
             a.root.update()
             if name == "settings":
@@ -45,6 +45,10 @@ class WindowTests(unittest.TestCase):
         a.timers.add_stopwatch()
         a.timers.add_alarm(9, 0, [0, 1])
         a.inbox.append({"ts": time.time(), "dir": "in", "peer": "x", "name": "Ravi", "text": "hi"})
+        a.notes.add("plain note")
+        a.notes.add("with a reminder", time.time() + 3600)
+        done = a.notes.add("finished")
+        a.notes.complete(done["id"])
         a.cfg.update(bc_token="t", bc_account="https://x", bc_account_name="Acme")
         a.bc.last_fetch = time.time()
         a.bc.items = [{"id": 1, "type": "todo", "content": "Thing", "due_on": None, "project": "P",
@@ -59,11 +63,52 @@ class WindowTests(unittest.TestCase):
         a.on_menu(E())
         a.root.update()
         self.assertIsNotNone(a.menu)
-        a.menu.open_sub(next(r[2] for r in a.menu.rows if r[2].get("label") == "Timer"))
-        a.root.update()
         labels = [r[2].get("label") for r in a.menu.rows]
         self.assertNotIn("Timers & alarms", labels)      # lives inside the Timer flyout now
+        self.assertIn("Notes & reminders", labels)
         a.menu.close()
+
+    def test_menu_tools_row(self):
+        a = self.app
+        ran = []
+        a.start_stopwatch = lambda *x: ran.append("sw")
+
+        class E:
+            x_root, y_root = 400, 300
+        a.on_menu(E())
+        a.root.update()
+        m = a.menu
+        y0, y1, it = next(r for r in m.rows if r[2].get("tools"))
+        rects = m.tool_rects(y0, y1, it)
+        self.assertEqual([t["label"] for t in it["tools"]], ["Timer", "Alarm", "Stopwatch"])
+
+        class C:
+            pass
+        x0, ty0, x1, ty1, i = rects[0]
+        C.x, C.y = (x0 + x1) / 2, (ty0 + ty1) / 2
+        m.on_click(C())                                  # Timer opens its flyout
+        a.root.update()
+        self.assertIsNotNone(m.child)
+        x0, ty0, x1, ty1, i = rects[2]
+        C.x, C.y = (x0 + x1) / 2, (ty0 + ty1) / 2
+        m.on_click(C())                                  # Stopwatch runs
+        for _ in range(5):
+            a.root.update()
+            time.sleep(0.01)
+        self.assertEqual(ran, ["sw"])
+        del a.start_stopwatch
+
+    def test_reminder_rings_and_done_clears(self):
+        a = self.app
+        n = a.notes.add("stand-up call", time.time() - 1)
+        for x in a.notes.due():
+            a.reminder_fired(x)
+        key = f"note:{n['id']}"
+        self.assertIn(key, a.alerts)
+        a.cards.close(key)
+        a.root.update()
+        self.assertNotIn(key, a.alerts)
+        a.notes.delete(n["id"])
 
     def test_menu_lists_people_with_buttons(self):
         a = self.app
@@ -71,7 +116,8 @@ class WindowTests(unittest.TestCase):
 
         class FakeNet:
             def online(self):
-                return [{"id": "p1", "name": "Ravi", "species": "kitty", "palette": "sky", "stage": "adult"},
+                return [{"id": "p1", "name": "Ravi", "species": "kitty", "palette": "sky", "stage": "adult",
+                         "via": "server"},
                         {"id": "p2", "name": "Asha", "status": "busy", "species": "bot"}]
         a.net = FakeNet()
         a.call = lambda pid: calls.append(("call", pid))

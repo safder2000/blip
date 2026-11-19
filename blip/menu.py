@@ -10,6 +10,19 @@ from .ui import KEY, make_overlay, pixel_box
 
 
 CALL_GREEN, CALL_HOVER = "#2fb865", "#28a359"
+MSG_BLUE, MSG_HOVER = "#3d8bfd", "#2f78e6"
+NET_BLUE = "#4ba3ff"
+
+
+_measure = {}
+
+
+def tkfont_measure(text, f=None):
+    import tkinter.font as tkfont
+    f = f or kit.F["small"]
+    if f not in _measure:
+        _measure[f] = tkfont.Font(font=f)
+    return _measure[f].measure(text)
 
 
 class PopMenu:
@@ -63,6 +76,9 @@ class PopMenu:
             elif it.get("person"):
                 self.rows.append((yy, yy + round(34 * S), it))
                 yy += round(34 * S)
+            elif it.get("tools"):
+                self.rows.append((yy, yy + round(40 * S), it))
+                yy += round(40 * S)
             else:
                 self.rows.append((yy, yy + rh, it))
                 yy += rh
@@ -161,6 +177,9 @@ class PopMenu:
             if it.get("person"):
                 self.draw_person(y0, y1, it)
                 continue
+            if it.get("tools"):
+                self.draw_tools(y0, y1, it)
+                continue
             en = it.get("enabled", True)
             hov = en and self.hl == ("row", id(it))
             if hov or (self.child and self.child.owner is it):
@@ -200,6 +219,40 @@ class PopMenu:
             out.append((x1 - bw, y0 + round(4 * S), x1, y1 - round(4 * S), len(it["buttons"]) - 1 - i))
         return out
 
+    def tool_rects(self, y0, y1, it):
+        S, p = self.S, self.p
+        pad = round(10 * S)
+        gap = round(4 * S)
+        n = len(it["tools"])
+        x0 = p + pad
+        w = (self.W - 2 * p - 2 * pad - (n - 1) * gap) / n
+        return [(x0 + i * (w + gap), y0 + round(3 * S), x0 + i * (w + gap) + w, y1 - round(3 * S), i)
+                for i in range(n)]
+
+    def draw_tools(self, y0, y1, it):
+        cv, S, p = self.cv, self.S, self.p
+        for x0, ty0, x1, ty1, i in self.tool_rects(y0, y1, it):
+            tool = it["tools"][i]
+            hov = self.hl == ("tool", id(it), i)
+            open_ = self.child is not None and self.child.owner is tool
+            pixel_box(cv, x0, ty0, x1, ty1, p, kit.ACCENT_SOFT if (hov or open_) else kit.TILE, "fg")
+            col = kit.ACCENT if (hov or open_) else kit.INK
+            gw = text_width(ICON[tool["icon"]], self.ip)
+            lab = tool["label"]
+            font = kit.F["small"]
+            fw = tkfont_measure(lab, font)
+            if gw + round(5 * S) + fw > (x1 - x0) - round(8 * S):       # long label: smaller type
+                font = kit.F["tiny"]
+                fw = tkfont_measure(lab, font)
+            total = gw + round(4 * S) + fw
+            sx = (x0 + x1 - total) / 2
+            draw_text(cv, sx, (ty0 + ty1 - 7 * self.ip) / 2, ICON[tool["icon"]], self.ip, col, "fg")
+            cv.create_text(sx + gw + round(4 * S), (ty0 + ty1) / 2, text=lab, font=font, fill=col,
+                           anchor="w", tags="fg")
+            if tool.get("badge"):
+                cv.create_text(x1 - round(4 * S), ty0 + round(7 * S), text=tool["badge"], font=kit.F["tiny"],
+                               fill=kit.ACCENT, anchor="e", tags="fg")
+
     def draw_person(self, y0, y1, it):
         cv, S, p = self.cv, self.S, self.p
         W = self.W
@@ -223,17 +276,21 @@ class PopMenu:
                 cv.create_rectangle(X, Y, X + sp, Y + sp, fill=c, width=0, tags="fg")
         tx = ax + round(34 * S)
         busy = pr.get("status") == "busy"
-        sub = "busy" if busy else ("online" if pr.get("via") == "server" else "")
-        cv.create_text(tx, (y0 + y1) / 2 - (round(6 * S) if sub else 0), text=it["label"], font=kit.F["body"],
-                       fill=kit.INK, anchor="w", tags="fg")
-        if sub:
-            cv.create_text(tx, (y0 + y1) / 2 + round(8 * S), text=sub, font=kit.F["tiny"],
-                           fill=kit.WARN if busy else kit.MUTED, anchor="w", tags="fg")
+        ty = (y0 + y1) / 2 - (round(6 * S) if busy else 0)
+        t = cv.create_text(tx, ty, text=it["label"], font=kit.F["body"], fill=kit.INK, anchor="w", tags="fg")
+        if pr.get("via") == "server":       # reached over the internet, not the office network
+            bp = max(2, round(1.6 * S))
+            gx = cv.bbox(t)[2] + round(7 * S)
+            draw_bitmap(cv, gx, ty - 3.5 * bp, BIG["globe"], bp, NET_BLUE, "fg")
+        if busy:
+            cv.create_text(tx, (y0 + y1) / 2 + round(8 * S), text="busy", font=kit.F["tiny"], fill=kit.WARN,
+                           anchor="w", tags="fg")
         for bx0, by0, bx1, by1, i in self.person_buttons(y0, y1, it):
             icon, cmd, en, _tip = it["buttons"][i]
             hov = self.hl == ("btn", id(it), i) and en
-            if icon == "phone":         # phone-app style: green button, white handset
-                fill = (CALL_HOVER if hov else CALL_GREEN) if en else kit.TILE
+            if icon in ("phone", "chat"):   # phone-app style: green call, blue message, white glyph
+                base, over = (CALL_GREEN, CALL_HOVER) if icon == "phone" else (MSG_BLUE, MSG_HOVER)
+                fill = (over if hov else base) if en else kit.TILE
                 col = "#ffffff" if en else kit.OFF
             else:
                 fill = kit.ACCENT if hov else kit.TILE
@@ -260,6 +317,11 @@ class PopMenu:
                 return ("head", 0), None
         for y0, y1, it in self.rows:
             if y0 <= y < y1 and not it.get("sep") and not it.get("section"):
+                if it.get("tools"):
+                    for tx0, ty0, tx1, ty1, i in self.tool_rects(y0, y1, it):
+                        if tx0 <= x <= tx1:
+                            return ("tool", id(it), i), it
+                    return None, None
                 if it.get("person"):
                     for bx0, by0, bx1, by1, i in self.person_buttons(y0, y1, it):
                         if bx0 <= x <= bx1:
@@ -272,7 +334,7 @@ class PopMenu:
         if key != self.hl:
             self.hl = key
             self.hover_since = time.monotonic()
-            self.cv.config(cursor="hand2" if key and key[0] in ("act", "head", "btn") else "")
+            self.cv.config(cursor="hand2" if key and key[0] in ("act", "head", "btn", "tool") else "")
             self.draw_content()
 
     def on_leave(self, e):
@@ -294,10 +356,11 @@ class PopMenu:
                 self.draw_content()
         self.win.after(120, self._hover_tick)
 
-    def open_sub(self, it):
+    def open_sub(self, it, y0=None):
         if self.child:
             self.child.close_self()
-        y0 = next(r[0] for r in self.rows if r[2] is it)
+        if y0 is None:
+            y0 = next(r[0] for r in self.rows if r[2] is it)
         sub = it["submenu"]()
         if not sub:
             sub = [{"label": "(nothing here yet)", "enabled": False}]
@@ -320,6 +383,18 @@ class PopMenu:
             icon, cmd, en, _tip = obj["buttons"][key[2]]
             if not en:
                 return
+        elif key[0] == "tool":
+            tool = obj["tools"][key[2]]
+            if tool.get("submenu"):
+                y0 = next(r[0] for r in self.rows if r[2] is obj)
+                if self.child and self.child.owner is tool:
+                    self.child.close_self()
+                    self.child = None
+                    self.draw_content()
+                else:
+                    self.open_sub(tool, y0)
+                return
+            cmd = tool.get("command")
         else:
             it = obj
             if not it.get("enabled", True):

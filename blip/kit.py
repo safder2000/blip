@@ -229,6 +229,44 @@ class Toggle(tk.Canvas):
         pixel_box(self, x0, m, x0 + k, m + k, p, KNOB)
 
 
+class Check(tk.Canvas):
+    """A pixel checkbox."""
+
+    def __init__(self, parent, value=False, command=None):
+        S = scale(parent)
+        self.s = round(20 * S)
+        super().__init__(parent, width=self.s, height=self.s, bg=bg_of(parent), highlightthickness=0, bd=0,
+                         cursor="hand2")
+        self.value, self.command, self.hov = bool(value), command, False
+        self.bind("<ButtonRelease-1>", lambda e=None: self.set(not self.value, notify=True))
+        self.bind("<Enter>", lambda e=None: self._hover(True))
+        self.bind("<Leave>", lambda e=None: self._hover(False))
+        self.draw()
+
+    def _hover(self, on):
+        self.hov = on
+        self.draw()
+
+    def set(self, value, notify=False):
+        self.value = bool(value)
+        self.draw()
+        if notify and self.command:
+            self.command(self.value)
+
+    def get(self):
+        return self.value
+
+    def draw(self):
+        self.delete("all")
+        p, s = px_of(self, 2), self.s
+        if self.value:
+            pixel_box(self, 0, 0, s, s, p, ACCENT)
+            ip = max(1, round(2 * scale(self)))
+            draw_text(self, (s - text_width(ICON["check"], ip)) / 2, (s - 7 * ip) / 2, ICON["check"], ip, ON_ACCENT)
+        else:
+            framed_box(self, 0, 0, s, s, p, ACCENT if self.hov else TRACK, SURFACE)
+
+
 class VolumeSlider(tk.Canvas):
     """Pixel 'signal bars' that light up from mint to pink. Click or drag to set the volume;
     a sample chirp plays at that level when you let go. Click the speaker to mute."""
@@ -527,6 +565,8 @@ class Window:
         self.app = app
         S = self.S = app.S
         t = self.top = tk.Toplevel(app.root, bg=BG)
+        t.withdraw()        # place it before it appears: popping up on the main screen first and then
+        #                     jumping to a screen with another scale makes Windows put it back
         t.title(f"{self.title} - Blip")
         t.protocol("WM_DELETE_WINDOW", self.close)
         t.resizable(False, False)
@@ -542,13 +582,14 @@ class Window:
         self.body = tk.Frame(t, bg=BG)
         self.body.pack(fill="both", expand=True, padx=round(20 * S), pady=(round(8 * S), round(20 * S)))
         self.build(self.body)
-        tint_titlebar(t)
         t.update_idletasks()
         l, tp, r, b = app.work
         w, h = t.winfo_reqwidth(), t.winfo_reqheight()
         x = int(min(max(app.x + app.W / 2 - w / 2, l + 10), r - w - 10))
         y = int(max(tp + 10, min(app.y - h - 10, b - h - 10)))
         t.geometry(f"+{x}+{y}")
+        t.deiconify()
+        tint_titlebar(t)
         t.attributes("-topmost", True)
         t.after(400, lambda: t.winfo_exists() and t.attributes("-topmost", False))
         t.focus_force()

@@ -25,19 +25,62 @@ def make_transparent(win):
     win.configure(bg=KEY)
 
 
+_SCALE = None
+
+
 def ui_scale(widget):
     """Pixels per 'design pixel'. Windows reports real DPI; macOS already works in points."""
     if MAC:
         return 1.0
+    if _SCALE:
+        return _SCALE
     return widget.winfo_fpixels("1i") / 96.0
 
 
 def dpi_aware():
+    """Windows: handle each monitor's scale ourselves. 'System aware' made Windows translate and
+    stretch our windows on a second screen with a different scale, and the pet could end up
+    floating above the taskbar while another Blip window was open."""
     if WIN:
         try:
-            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+            if ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):   # per-monitor v2
+                return
         except Exception:
             pass
+        for level in (2, 1):
+            try:
+                ctypes.windll.shcore.SetProcessDpiAwareness(level)
+                return
+            except Exception:
+                continue
+
+
+def monitor_dpi(x, y):
+    """DPI of the screen at x, y (Windows), or None."""
+    if not WIN:
+        return None
+    try:
+        hmon = _user32.MonitorFromPoint(wintypes.POINT(int(x), int(y)), 2)
+        dx, dy = ctypes.c_uint(), ctypes.c_uint()
+        if ctypes.windll.shcore.GetDpiForMonitor(hmon, 0, ctypes.byref(dx), ctypes.byref(dy)) == 0:
+            return dx.value
+    except Exception:
+        pass
+    return None
+
+
+def use_scale(root, x, y):
+    """Size Blip for the screen the pet lives on, fonts included. Returns the scale."""
+    global _SCALE
+    if not WIN:
+        return ui_scale(root)
+    dpi = monitor_dpi(x, y) or root.winfo_fpixels("1i")
+    _SCALE = max(1.0, dpi / 96.0)
+    try:
+        root.tk.call("tk", "scaling", dpi / 72.0)
+    except Exception:
+        pass
+    return _SCALE
 
 
 # ------------------------------------------------------------------ screen work area

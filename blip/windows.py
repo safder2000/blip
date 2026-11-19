@@ -47,6 +47,7 @@ def S_(w, v):
 def ask_text(app, title, prompt, parent=None, initial="", placeholder="", ok="OK"):
     """A small modal prompt in Blip's style. Returns the text or None."""
     top = tk.Toplevel(parent or app.root, bg=kit.BG)
+    top.withdraw()                          # place first, then show (see kit.Window)
     top.title(title)
     top.resizable(False, False)
     top.transient(parent or app.root)
@@ -66,16 +67,90 @@ def ask_text(app, title, prompt, parent=None, initial="", placeholder="", ok="OK
     Btn(bar, "Cancel", lambda: done(None)).pack(side="right", padx=S_(top, 8))
     fld.entry.bind("<Return>", lambda e: done(fld.get()))
     top.bind("<Escape>", lambda e: done(None))
-    kit.tint_titlebar(top)
     top.update_idletasks()
     l, t, r, b = app.work
     w, h = top.winfo_reqwidth(), top.winfo_reqheight()
     x = int(min(max(app.x + app.W / 2 - w / 2, l + 10), r - w - 10))
     y = int(max(t + 10, app.y - h - 10))
     top.geometry(f"+{x}+{y}")
+    top.deiconify()
+    kit.tint_titlebar(top)
     top.attributes("-topmost", True)
     fld.entry.focus_force()
     fld.entry.select_range(0, "end")
+    top.grab_set()
+    top.wait_window()
+    return res["v"]
+
+
+WHEN = [("none", "No reminder"), ("30m", "In 30 min"), ("1h", "In 1 hour"), ("tomorrow", "Tomorrow 9:00"),
+        ("pick", "Pick a time")]
+
+
+def _when_ts(choice, typed):
+    """(timestamp or None, error or None) for the reminder picker."""
+    from .notes import parse_when
+    if choice == "none":
+        return None, None
+    if choice == "pick":
+        ts = parse_when(typed)
+        return (ts, None) if ts else (None, "Try 'in 20m', '5pm', '17:30' or 'tomorrow 10'.")
+    return parse_when({"30m": "in 30m", "1h": "in 1h", "tomorrow": "tomorrow 9:00"}[choice]), None
+
+
+def ask_reminder(app, parent=None):
+    """'Remind me...' dialog: what + when. Returns (text, timestamp_or_None) or None."""
+    top = tk.Toplevel(parent or app.root, bg=kit.BG)
+    top.withdraw()                          # place first, then show (see kit.Window)
+    top.title("Remind me")
+    top.resizable(False, False)
+    top.transient(parent or app.root)
+    f = tk.Frame(top, bg=kit.BG)
+    f.pack(padx=S_(top, 22), pady=S_(top, 18))
+    label(f, "Remind me to…", "bold").pack(anchor="w")
+    what = Field(f, "", width=40, placeholder="call the client back")
+    what.pack(fill="x", pady=(S_(top, 8), S_(top, 14)))
+    label(f, "When?", "bold").pack(anchor="w")
+    whenf = tk.Frame(f, bg=kit.BG)
+    picked = Field(whenf, "", width=24, placeholder="in 20m · 5pm · 17:30 · tomorrow 10")
+    chips = Chips(f, WHEN[1:], "30m", command=lambda v: (picked.pack(anchor="w", pady=(S_(top, 8), 0))
+                                                          if v == "pick" else picked.pack_forget(),
+                                                          v == "pick" and picked.entry.focus_set()))
+    chips.pack(anchor="w", pady=(S_(top, 8), 0))
+    whenf.pack(fill="x")
+    err = tk.Label(f, text="", font=kit.F["small"], fg=kit.DANGER, bg=kit.BG)
+    err.pack(anchor="w", pady=(S_(top, 6), 0))
+    res = {"v": None}
+
+    def ok():
+        text = what.get().strip()
+        if not text:
+            err.config(text="What should Blip remind you about?")
+            what.entry.focus_set()
+            return
+        ts, e = _when_ts(chips.get(), picked.get())
+        if e:
+            err.config(text=e)
+            return
+        res["v"] = (text, ts)
+        top.destroy()
+    bar = tk.Frame(f, bg=kit.BG)
+    bar.pack(fill="x", pady=(S_(top, 6), 0))
+    Btn(bar, "Remind me", ok, kind="primary", icon="bell").pack(side="right")
+    Btn(bar, "Cancel", top.destroy).pack(side="right", padx=S_(top, 8))
+    what.entry.bind("<Return>", lambda e: ok())
+    picked.entry.bind("<Return>", lambda e: ok())
+    top.bind("<Escape>", lambda e: top.destroy())
+    top.update_idletasks()
+    l, t, r, b = app.work
+    w, h = top.winfo_reqwidth(), top.winfo_reqheight() + S_(top, 40)
+    x = int(min(max(app.x + app.W / 2 - w / 2, l + 10), r - w - 10))
+    y = int(max(t + 10, app.y - h - 10))
+    top.geometry(f"+{x}+{y}")
+    top.deiconify()
+    kit.tint_titlebar(top)
+    top.attributes("-topmost", True)
+    what.entry.focus_force()
     top.grab_set()
     top.wait_window()
     return res["v"]
@@ -1184,6 +1259,153 @@ class TasksWindow(kit.Window):
                 icon="check").pack(side="left")
         if it.get("url"):
             IconBtn(btns, "open", lambda: webbrowser.open(it["url"])).pack(side="left", padx=(round(4 * S), 0))
+
+
+# ------------------------------------------------------------------ notes
+class NotesWindow(kit.Window):
+    title = "Notes"
+    icon = "note"
+    subtitle = "Jot things down. Add a time and your pet reminds you."
+
+    def build(self, f):
+        S = self.S
+        c = Card(f)
+        c.pack(fill="x")
+        b = c.body
+        self.text = Field(b, "", width=46, placeholder="Write a note…")
+        self.text.pack(fill="x")
+        self.text.entry.bind("<Return>", lambda e: self.add())
+        row = tk.Frame(b, bg=kit.SURFACE)
+        row.pack(fill="x", pady=(round(10 * S), 0))
+        self.when = Chips(row, WHEN, "none", command=self._when_changed)
+        self.when.pack(side="left")
+        self.picked = Field(b, "", width=26, placeholder="in 20m · 5pm · 17:30 · tomorrow 10")
+        self.picked.entry.bind("<Return>", lambda e: self.add())
+        bar = tk.Frame(b, bg=kit.SURFACE)
+        bar.pack(fill="x", pady=(round(10 * S), 0))
+        self.err = tk.Label(bar, text="", font=kit.F["small"], fg=kit.DANGER, bg=kit.SURFACE)
+        self.err.pack(side="left")
+        self.add_btn = Btn(bar, "Add note", self.add, kind="primary", small=True, icon="plus")
+        self.add_btn.pack(side="right")
+        self.bar = bar
+        head = tk.Frame(f, bg=kit.BG)
+        head.pack(fill="x", pady=(round(12 * S), round(4 * S)))
+        self.count = muted(head, "")
+        self.count.pack(side="left")
+        self.clear_btn = Btn(head, "Clear done", self.clear_done, kind="ghost", small=True, icon="trash")
+        self.clear_btn.pack(side="right")
+        self.list = Scroller(f, height=round(330 * S), bg=kit.BG)
+        self.list.pack(fill="both", expand=True)
+        self.list.cv.config(width=round(520 * S))
+        self.sig = None
+        self.text.entry.focus_set()
+
+    def _when_changed(self, v):
+        if v == "pick":
+            self.picked.pack(anchor="w", pady=(round(8 * self.S), 0), before=self.bar)
+            self.picked.entry.focus_set()
+        else:
+            self.picked.pack_forget()
+        self.add_btn.set_text("Add reminder" if v != "none" else "Add note")
+        self.err.config(text="")
+
+    def add(self):
+        text = self.text.get().strip()
+        if not text:
+            self.text.entry.focus_set()
+            return
+        ts, e = _when_ts(self.when.get(), self.picked.get())
+        if e:
+            self.err.config(text=e)
+            return
+        self.app.notes.add(text, ts)
+        self.text.set("")
+        self.picked.set("")
+        self.when.set("none", notify=True)
+        self.text.entry.focus_set()
+        if ts:
+            from .notes import describe_when
+            self.app.board("Reminder " + describe_when(ts), 4)
+        self.sig = None
+        self.refresh()
+
+    def clear_done(self):
+        self.app.notes.clear_done()
+        self.sig = None
+        self.refresh()
+
+    def refresh(self):
+        notes = self.app.notes
+        items = notes.ordered()
+        minute = int(time.time() // 60)
+        sig = (minute, [(n["id"], n["text"], n.get("remind"), n.get("fired"), n.get("done")) for n in items])
+        if sig == self.sig:
+            return
+        self.sig = sig
+        open_n = sum(1 for n in items if not n.get("done"))
+        pend = len(notes.pending())
+        self.count.config(text=(f"{open_n} note{'s' if open_n != 1 else ''}" if items else "")
+                          + (f"  ·  {pend} reminder{'s' if pend != 1 else ''} set" if pend else ""))
+        self.clear_btn.set_enabled(any(n.get("done") for n in items))
+        self.list.clear()
+        if not items:
+            empty_state(self.list.inner, "No notes yet",
+                        "Write something above. Pick a time and your pet pops it up when it's due, "
+                        "even after a restart.")
+            return
+        for n in items:
+            self._row(n)
+
+    def _row(self, n):
+        from .notes import describe_when
+        app, S = self.app, self.S
+        notes = app.notes
+        done = bool(n.get("done"))
+        card = Card(self.list.inner, pad=10)
+        card.pack(fill="x", pady=(0, round(6 * S)))
+        b = card.body
+        box = kit.Check(b, done, lambda v, nid=n["id"]: (notes.complete(nid, v), self._changed()))
+        box.pack(side="left", anchor="n", pady=(round(2 * S), 0))
+        mid = tk.Frame(b, bg=kit.SURFACE)
+        mid.pack(side="left", fill="x", expand=True, padx=(round(10 * S), round(6 * S)))
+        label(mid, n["text"], "body", fg=kit.MUTED if done else kit.INK, wraplength=round(300 * S)).pack(anchor="w")
+        if n.get("remind"):
+            when = describe_when(n["remind"])
+            if done:
+                info, col = f"reminder {when}", kit.MUTED
+            elif n.get("fired"):
+                info, col = f"reminded {when}", kit.MUTED
+            else:
+                info, col = f"\u23f0 {when}", kit.ACCENT
+            label(mid, info, "small", fg=col).pack(anchor="w")
+        btns = tk.Frame(b, bg=kit.SURFACE)
+        btns.pack(side="right", anchor="n")
+        IconBtn(btns, "bell", lambda nid=n["id"]: self._set_time(nid)).pack(side="left")
+        IconBtn(btns, "trash", lambda nid=n["id"]: (notes.delete(nid), self._changed())).pack(
+            side="left", padx=(round(2 * S), 0))
+
+    def _set_time(self, nid):
+        from .notes import parse_when
+        n = self.app.notes.get(nid)
+        if not n:
+            return
+        txt = ask_text(self.app, "Reminder", "When? (in 20m, 5pm, 17:30, tomorrow 10 - empty = no reminder)",
+                       parent=self.top, placeholder="in 30m")
+        if txt is None:
+            return
+        if not txt.strip():
+            self.app.notes.set_reminder(nid, None)
+        else:
+            ts = parse_when(txt)
+            if not ts:
+                self.app.board("Try 5pm or in 20m", 3)
+                return
+            self.app.notes.set_reminder(nid, ts)
+        self._changed()
+
+    def _changed(self):
+        self.sig = None
+        self.refresh()
 
 
 # ------------------------------------------------------------------ first run

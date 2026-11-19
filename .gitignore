@@ -8,3 +8,4 @@ assets/blip.iconset/
 assets/blip.icns
 .venv/
 vendor/
+.repro/
