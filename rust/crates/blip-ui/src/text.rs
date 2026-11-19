@@ -109,4 +109,28 @@ impl Fonts {
         }
         format!("{}\u{2026}", s.trim_end())
     }
+
+    /// Break `text` into lines no wider than `max` pixels (keeps the text's own line breaks).
+    pub fn wrap(&mut self, text: &str, size: f32, bold: bool, max: i32) -> Vec<String> {
+        let mut out = Vec::new();
+        for para in text.split('\n') {
+            let mut line = String::new();
+            for word in para.split(' ') {
+                let trial = if line.is_empty() { word.to_string() } else { format!("{line} {word}") };
+                if self.measure(&trial, size, bold) <= max || line.is_empty() {
+                    line = trial;
+                } else {
+                    out.push(std::mem::take(&mut line));
+                    line = word.to_string();
+                }
+            }
+            out.push(line);
+        }
+        out
+    }
+
+    /// Line height in pixels for `size`.
+    pub fn line_height(&self, size: f32) -> i32 {
+        self.regular.horizontal_line_metrics(size).map(|m| m.new_line_size.ceil() as i32).unwrap_or((size * 1.3) as i32)
+    }
 }

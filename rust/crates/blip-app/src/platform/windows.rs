@@ -139,3 +139,8 @@ pub fn system_dark() -> bool {
     } == 0;
     ok && v == 0
 }
+
+/// The login name, as a default display name.
+pub fn user_name() -> String {
+    std::env::var("USERNAME").unwrap_or_default()
+}

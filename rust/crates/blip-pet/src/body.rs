@@ -50,6 +50,13 @@ pub enum Action {
     Held,
     Fall,
     Unfold,
+    Eat,
+    Play,
+    Sleep,
+    /// a call or alarm: dash to the middle of the screen and hop
+    Ring,
+    /// the pet left: float gently as a ghost
+    Gone,
 }
 
 /// What a press turned into, for the app to act on.
@@ -77,7 +84,16 @@ pub struct Body {
     pub bounces: u32,
     lucky: bool,
     pub wander: bool,
+    /// walks slowly (sick)
+    pub slow: bool,
+    /// screen scale, for jump height
+    pub scale_hint: f64,
     pub happy_until: f64,
+    /// where to dash to while ringing
+    pub ring_target: Option<f64>,
+    /// sideways shake while ringing, for drawing
+    pub jitter: f64,
+    phase: f64,
     trail: Vec<(f64, f64, f64)>,
     press: Option<Press>,
     /// the current press turned into "open the menu" (so letting go isn't a pat)
@@ -115,7 +131,12 @@ impl Body {
             bounces: 0,
             lucky: false,
             wander: true,
+            slow: false,
+            scale_hint: 1.0,
             happy_until: 0.0,
+            ring_target: None,
+            jitter: 0.0,
+            phase: 0.0,
             trail: Vec::new(),
             press: None,
             held_menu: false,
@@ -132,7 +153,11 @@ impl Body {
         (self.rng.wrapping_mul(0x2545F4914F6CDD1D) >> 11) as f64 / (1u64 << 53) as f64
     }
 
-    fn set(&mut self, a: Action, secs: f64, now: f64) {
+    pub fn until(&self) -> f64 {
+        self.action_until
+    }
+
+    pub fn set(&mut self, a: Action, secs: f64, now: f64) {
         self.action = a;
         self.action_until = now + secs;
     }
@@ -151,8 +176,14 @@ impl Body {
         let s = geo.s;
         let (lo, hi) = Self::bounds(geo, work);
         let ground = Self::ground(geo, work);
+        self.jitter = 0.0;
         match self.action {
             Action::Held => {}
+            Action::Gone => {
+                self.phase += 0.04;
+                let target = ground - 30.0 * s + self.phase.sin() * 6.0 * s;
+                self.y += (target - self.y) * 0.05;
+            }
             Action::Fall if self.airborne || self.ball || self.y < ground - 0.5 => {
                 self.airborne = true;
                 self.fly(geo, work, ground, lo, hi, now);
@@ -162,6 +193,9 @@ impl Body {
                 self.chute = 0;
                 self.vy += 0.9 * s;
                 self.y += self.vy;
+                if self.action == Action::Play {
+                    self.x += self.dir as f64 * 2.0 * s;
+                }
                 if self.y >= ground {
                     self.y = ground;
                     self.vy = 0.0;
@@ -169,6 +203,8 @@ impl Body {
                     self.land = 2;
                     if self.action == Action::Fall {
                         self.set(Action::Idle, 1.5, now);
+                    } else if self.action == Action::Play && now < self.action_until {
+                        self.jump();
                     }
                 }
             }
@@ -180,8 +216,22 @@ impl Body {
                 } else {
                     self.vx = 0.0;
                 }
-                if self.action == Action::Walk {
-                    self.x += self.dir as f64 * 1.5 * s;
+                match self.action {
+                    Action::Walk => self.x += self.dir as f64 * if self.slow { 0.7 } else { 1.5 } * s,
+                    Action::Play if now < self.action_until => self.jump(),
+                    Action::Ring => {
+                        if let Some(t) = self.ring_target.filter(|t| (t - self.x).abs() > 4.0) {
+                            let step = 9.0 * s;
+                            self.dir = if t > self.x { 1 } else { -1 };
+                            self.x += (t - self.x).clamp(-step, step);
+                        } else {
+                            self.jitter = if self.frame % 2 == 1 { 2.0 } else { -2.0 } * s;
+                            if self.random() < 0.02 {
+                                self.jump();
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -201,6 +251,14 @@ impl Body {
                 self.held_menu = true;
                 self.menu_pending = true;
             }
+        }
+    }
+
+    pub fn jump(&mut self) {
+        self.vy = -8.5 * 1.0f64.max(self.scale_hint);
+        self.airborne = true;
+        if self.action == Action::Play && self.random() < 0.3 {
+            self.dir = -self.dir;
         }
     }
 
@@ -308,6 +366,7 @@ impl Body {
                 self.happy_until = now + 2.0;
             }
             Action::Idle | Action::Walk if now >= self.action_until => self.choose(now),
+            Action::Play if now >= self.action_until && !self.airborne => self.set(Action::Idle, 2.0, now),
             _ => {}
         }
     }
@@ -336,11 +395,14 @@ impl Body {
         let Some(mut p) = self.press else { return false };
         if !p.moved && (sx - p.at_x).abs() + (sy - p.at_y).abs() > 5.0 {
             p.moved = true;
-            self.ball = false;
-            self.chute = 0;
-            self.set(Action::Held, 1e18, now);
+            if self.action != Action::Gone {
+                self.ball = false;
+                self.chute = 0;
+                self.ring_target = None;
+                self.set(Action::Held, 1e18, now);
+            }
         }
-        if p.moved {
+        if p.moved && self.action != Action::Gone {
             self.x = sx - p.off_x;
             self.y = sy - p.off_y;
             self.trail.push((now, sx, sy));
@@ -360,6 +422,9 @@ impl Body {
         let p = self.press.take()?;
         if !p.moved {
             self.happy_until = now + 1.5;
+            return Some(Gesture::Pat);
+        }
+        if self.action == Action::Gone {
             return Some(Gesture::Pat);
         }
         let (vx, vy) = self.throw_speed(geo, now);
@@ -424,20 +489,36 @@ impl Body {
 
     /// The pet as drawn right now: normal pose, ball, parachute, flame trail.
     pub fn sprite(&mut self, look: &Look, geo: &Geo, now: f64) -> Sprite {
+        let mood = self.mood(now);
+        self.sprite_as(look, geo, mood, None)
+    }
+
+    /// Like `sprite`, with the face chosen by the app; `egg` = hatch progress for an egg.
+    pub fn sprite_as(&mut self, look: &Look, geo: &Geo, mood: &str, egg: Option<f64>) -> Sprite {
         if self.ball {
-            let mut g = sprites::build_ball(sprites::palette(&look.palette), self.spin, true, if self.land > 0 { 0.25 } else { 0.0 });
+            let colors = if egg.is_some() { (sprites::col::EGG, sprites::col::EGG2, sprites::col::SPOT) } else { sprites::palette(&look.palette) };
+            let mut g = sprites::build_ball(colors, self.spin, egg.is_none(), if self.land > 0 { 0.25 } else { 0.0 });
             add_trail(&mut g, self.vx, self.vy, geo);
             return g;
         }
-        let mood = self.mood(now);
+        if let Some(progress) = egg {
+            return sprites::build_egg(self.frame, progress);
+        }
+        let facing = if matches!(self.action, Action::Walk | Action::Play | Action::Eat) || (self.action == Action::Ring && self.ring_target.is_some()) { self.dir } else { 0 };
+        let squash = self.land > 0
+            || match self.action {
+                Action::Walk | Action::Ring => self.frame % 2 == 0,
+                Action::Sleep => self.frame % 8 < 4,
+                _ => self.frame % 6 == 0,
+            };
         let blink = (mood == "normal" || mood == "sad") && self.random() < 0.08;
         let mut g = sprites::build_pet(&sprites::PetLook {
             stage: look.stage,
             palette: &look.palette,
             mood,
             frame: self.frame,
-            facing: self.facing(),
-            squash: self.squash(),
+            facing,
+            squash,
             blink,
             species: &look.species,
         });

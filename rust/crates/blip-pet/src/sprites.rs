@@ -527,6 +527,29 @@ pub fn build_ball(colors: (Color, Color, Color), angle: f64, face: bool, squash:
     g
 }
 
+
+// ---------------------------------------------------------------- props (from blip/sprites.py)
+pub const NOTE: [Cell; 6] = [(1, 0), (2, 0), (1, 1), (1, 2), (0, 3), (1, 3)];
+pub const BOWL: Color = 0xc0703a;
+pub const BERRY: Color = 0xc2185b;
+pub const LEAF: Color = 0x4caf50;
+pub const COOKIE: Color = 0xe0a458;
+pub const CHIP: Color = 0x5a3a1a;
+pub const PILL: Color = 0xff6b6b;
+
+/// Food cells (x, y, colour, is_bowl) for meal / snack / pill.
+pub fn food(kind: &str) -> Vec<(i32, i32, Color, bool)> {
+    match kind {
+        "meal" => vec![(2, 0, LEAF, false), (1, 0, BERRY, false), (3, 0, BERRY, false), (0, 1, BERRY, false), (1, 1, BERRY, false), (2, 1, BERRY, false), (3, 1, BERRY, false), (4, 1, BERRY, false), (0, 2, BOWL, true), (1, 2, BOWL, true), (2, 2, BOWL, true), (3, 2, BOWL, true), (4, 2, BOWL, true), (1, 3, BOWL, true), (2, 3, BOWL, true), (3, 3, BOWL, true)],
+        "snack" => vec![(1, 0, COOKIE, false), (2, 0, COOKIE, false), (0, 1, COOKIE, false), (1, 1, CHIP, false), (2, 1, COOKIE, false), (3, 1, COOKIE, false), (0, 2, COOKIE, false), (1, 2, COOKIE, false), (2, 2, CHIP, false), (3, 2, COOKIE, false), (1, 3, COOKIE, false), (2, 3, COOKIE, false)],
+        "pill" => vec![(0, 2, PILL, false), (1, 2, PILL, false), (2, 2, col::WHITE, false), (3, 2, col::WHITE, false), (0, 3, PILL, false), (1, 3, PILL, false), (2, 3, col::WHITE, false), (3, 3, col::WHITE, false)],
+        _ => vec![],
+    }
+}
+
+/// The poop: rows of '.', 'o' (outline) and 'b' (brown).
+pub const POOP: [&str; 6] = ["...oo...", "..obbo..", "..obbbo.", ".obbbbo.", "obbbbbbo", ".oooooo."];
+
 /// A stable fingerprint of a sprite, to compare with the Python version.
 pub fn fingerprint(g: &Sprite) -> String {
     use std::fmt::Write;

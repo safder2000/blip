@@ -9,3 +9,4 @@ assets/blip.icns
 .venv/
 vendor/
 .repro/
+.testdata/

@@ -140,3 +140,8 @@ pub fn system_dark() -> bool {
         .map(|o| String::from_utf8_lossy(&o.stdout).to_lowercase().contains("dark"))
         .unwrap_or(true)
 }
+
+/// The login name, as a default display name.
+pub fn user_name() -> String {
+    std::env::var("USER").unwrap_or_default()
+}

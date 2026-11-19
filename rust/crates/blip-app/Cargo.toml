@@ -12,6 +12,8 @@ path = "src/main.rs"
 [dependencies]
 blip-pet = { path = "../blip-pet" }
 blip-ui = { path = "../blip-ui" }
+blip-core = { path = "../blip-core" }
+rodio = { version = "0.19", default-features = false }
 tray-icon = "0.19"
 serde_json.workspace = true
 winit = "0.30"

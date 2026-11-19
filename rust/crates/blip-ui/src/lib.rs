@@ -2,7 +2,9 @@
 //! A [`Canvas`] is premultiplied ARGB pixels (`0xAARRGGBB`); transparent pixels let the desktop
 //! show through. Text uses the system font through `fontdue`.
 
+pub mod card;
 pub mod menu;
+pub mod scene;
 pub mod theme;
 pub mod text;
 
