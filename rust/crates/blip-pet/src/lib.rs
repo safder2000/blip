@@ -2,5 +2,6 @@
 //! Nothing here opens a window, so all of it can be tested headless.
 
 pub mod body;
+pub mod pixfont;
 pub mod render;
 pub mod sprites;

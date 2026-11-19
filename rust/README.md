@@ -24,7 +24,8 @@ compatible with the Python wire format: signed envelopes, team encryption, room 
 | `blip-proto` | Wire format, team crypto, link parsing, voice packets | done, matches Python |
 | `blip-server` | Online server, drop-in for `blip/server.py` | done, passes the Python server tests |
 | `blip-pet` | Sprites (all 8,064 poses match Python pixel for pixel), movement, physics, rendering | done |
-| `blip-app` | The desktop pet: transparent window on the taskbar, walk, drag, throw, click-through | step 2 done on Windows; Mac built by CI, not yet run on a real Mac |
+| `blip-ui` | Software drawing: pixel boxes, pixel font and icons, system-font text, themes, the right-click menu | done |
+| `blip-app` | The desktop pet: transparent window, walk, drag, throw, click-through, tray / menu-bar icon, right-click menu | steps 2-3 done on Windows; Mac built and launched by CI, not yet seen on a real Mac |
 
 ## Plan
 
@@ -37,7 +38,11 @@ compatible with the Python wire format: signed envelopes, team encryption, room 
    through where there's no pet, no Dock icon. Sprites ported from `blip/sprites.py`, physics from
    `blip/app.py`. Run it: `cargo run --release -p blip-app` (it reads your pet's look from the Python
    Blip's state.json, read-only).
-3. **Tray / menu bar** (`tray-icon`) and the pixel right-click menu and cards in their own overlay windows.
+3. **Tray / menu bar and menu**: done. `tray-icon` gives a real tray icon on Windows and a menu-bar icon on
+   Mac (Open menu, Show pet, Quit). The pixel menu is drawn by `blip-ui` (same layout as `blip/menu.py`,
+   preview: `cargo run -p blip-ui --example menu_preview -- <dir> 1.25`) and opens on right-click,
+   Control-click on a Mac, or press and hold. For now it only lists what works in Rust; the rest
+   joins as later steps land. Testing without a mouse: `BLIP_DEMO_MENU=1` opens it by itself.
 4. **Windows**: Settings, Notes, Timers, Buddies (`egui`, charcoal theme, same layout as today).
 5. **Office network**: UDP discovery, TCP messages and the server link (`tokio`), using `blip-proto`.
 6. **Voice** (`cpal` + Opus), **Basecamp**, **updater**.

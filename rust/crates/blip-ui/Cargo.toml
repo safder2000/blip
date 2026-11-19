@@ -1,0 +1,10 @@
+[package]
+name = "blip-ui"
+description = "Software drawing for Blip's own windows (menu, cards): pixel boxes, pixel text, icons, system-font text, themes."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+blip-pet = { path = "../blip-pet" }
+fontdue = "0.9"

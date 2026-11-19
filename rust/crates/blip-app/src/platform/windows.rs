@@ -125,3 +125,17 @@ pub fn left_button_down() -> bool {
 pub fn data_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into())).join("Blip")
 }
+
+/// Windows set to dark mode for apps.
+pub fn system_dark() -> bool {
+    use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
+    let key: Vec<u16> = "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize\0".encode_utf16().collect();
+    let name: Vec<u16> = "AppsUseLightTheme\0".encode_utf16().collect();
+    let mut v: u32 = 1;
+    let mut size = 4u32;
+    let ok = unsafe {
+        RegGetValueW(HKEY_CURRENT_USER, key.as_ptr(), name.as_ptr(), RRF_RT_REG_DWORD, null_mut(),
+                     &mut v as *mut u32 as *mut _, &mut size)
+    } == 0;
+    ok && v == 0
+}

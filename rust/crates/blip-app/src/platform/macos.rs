@@ -131,3 +131,12 @@ pub fn data_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
         .join("Library/Application Support/Blip")
 }
+
+/// macOS set to dark mode.
+pub fn system_dark() -> bool {
+    std::process::Command::new("defaults")
+        .args(["read", "-g", "AppleInterfaceStyle"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_lowercase().contains("dark"))
+        .unwrap_or(true)
+}
