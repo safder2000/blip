@@ -99,10 +99,10 @@ class OpusCallTests(unittest.TestCase):
 
     def test_call_through_a_real_server(self):
         from blip.net import Net
-        from blip.server import Server
         from tests.test_net import Inbox, free_udp_port, wait as nwait
         import uuid
-        srv = Server(port=0, host="127.0.0.1", log=None).start()
+        from tests import server_under_test
+        srv = server_under_test.start()
         link = f"127.0.0.1:{srv.port}#team=callteam1"
         nets = []
         try:

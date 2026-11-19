@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = ["crates/blip-proto", "crates/blip-server"]
+
+[workspace.package]
+version = "0.8.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+serde_json = { version = "1", features = ["float_roundtrip"] }
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+hmac = "0.12"
+blake2b_simd = "1"
+base64 = "0.22"
+getrandom = "0.2"
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

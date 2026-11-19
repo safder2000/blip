@@ -27,7 +27,8 @@ You don't need one to use Blip. It's an optional extra for teams that aren't all
 
 ## 1. Run the server
 
-Pick one. They all run the same small program, which uses only the Python standard library.
+Pick one. The Docker image and the Linux binary are the Rust server, a single small program;
+the Python one (`server.py`) works the same way and is there for anywhere Python is easier.
 
 **Docker**
 
@@ -45,6 +46,13 @@ services:
     restart: unless-stopped
     ports:
       - "47620:47620"
+```
+
+**Linux binary** (x86-64 Linux, e.g. a NAS or VPS; on a Raspberry Pi use Docker or Python)
+
+```
+curl -fsSLO https://github.com/safder2000/blip/releases/latest/download/blip-server-linux-x64
+chmod +x blip-server-linux-x64 && ./blip-server-linux-x64
 ```
 
 **Plain Python** (any PC or Raspberry Pi with Python 3.8+)

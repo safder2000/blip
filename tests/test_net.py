@@ -6,7 +6,8 @@ import uuid
 
 from blip.net import Net, check, key_from_passphrase, seal
 from blip import link as L
-from blip.server import Server
+from blip.server import Server  # noqa: F401
+from tests import server_under_test
 
 
 def free_udp_port():
@@ -114,9 +115,10 @@ class LanTests(unittest.TestCase):
 
 class ServerTests(unittest.TestCase):
     def setUp(self):
-        self.srv = Server(port=0, host="127.0.0.1", log=None).start()
+        self.srv = server_under_test.start()
         self.seen = []
-        self.srv.tap = self.seen.append
+        if not server_under_test.external():
+            self.srv.tap = self.seen.append
         self.nets = []
 
     def tearDown(self):
@@ -143,7 +145,7 @@ class ServerTests(unittest.TestCase):
         self.assertTrue(wait(lambda: bbox.of("msg")))
         self.assertEqual(bbox.of("msg")[0]["body"]["text"], "lunch at the samosa place?")
         self.assertEqual(res, [True])
-        raw = "".join(self.seen)
+        raw = "".join(self.seen)            # (empty for an external server: we can't watch inside it)
         for secret in ("Ann", "Ben", "samosa", "office", "abcd1234ef"):
             self.assertNotIn(secret, raw)          # the server only ever sees ciphertext
         self.assertEqual(self.srv.stats()["teams"], 1)
@@ -183,6 +185,27 @@ class ServerTests(unittest.TestCase):
         a.server_voice(b.id, b"audio")
         self.assertTrue(wait(lambda: got))
         self.assertEqual(got[0], (a.id, b"audio"))
+
+    def test_old_pets_on_plain_tcp_lines_still_meet(self):
+        """Pets before v0.7 spoke plain JSON lines with no rooms; they still reach each other."""
+        import json as _json
+        a = socket.create_connection(("127.0.0.1", self.srv.port), timeout=5)
+        b = socket.create_connection(("127.0.0.1", self.srv.port), timeout=5)
+        try:
+            nl = bytes([10])
+            b.sendall(_json.dumps({"from": "bbb", "to": None, "type": "hello"}).encode() + nl)
+            time.sleep(0.3)
+            a.sendall(_json.dumps({"from": "aaa", "to": None, "type": "hello"}).encode() + nl)
+            a.sendall(_json.dumps({"from": "aaa", "to": "bbb", "type": "msg"}).encode() + nl)
+            got = b""
+            end = time.time() + 5
+            while got.count(nl) < 2 and time.time() < end:
+                got += b.recv(4096)
+            lines = [_json.loads(x) for x in got.splitlines() if x.strip()]
+            self.assertEqual([(m["from"], m["type"]) for m in lines], [("aaa", "hello"), ("aaa", "msg")])
+        finally:
+            a.close()
+            b.close()
 
     def test_status_page_and_health(self):
         import json as _json

@@ -1,0 +1,160 @@
+{
+ "group_key": "ad04c8b309df845972b755f2cc9b5f51e5e8ecabaab20929b8b5c53774f9c874",
+ "envelopes": [
+  {
+   "input": "{\"v\": 1, \"type\": \"hello\", \"from\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"to\": null, \"ts\": 1795070000.1234565, \"nonce\": \"n1\", \"body\": {\"name\": \"Safder\", \"status\": \"available\", \"voice\": true, \"opus\": true, \"port\": 47611, \"peers\": [\"192.168.1.7\", \"192.168.1.6\"], \"ver\": \"0.7.6\"}}",
+   "canon": "{\"body\":{\"name\":\"Safder\",\"opus\":true,\"peers\":[\"192.168.1.7\",\"192.168.1.6\"],\"port\":47611,\"status\":\"available\",\"ver\":\"0.7.6\",\"voice\":true},\"from\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"nonce\":\"n1\",\"to\":null,\"ts\":1795070000.1234565,\"type\":\"hello\",\"v\":1}",
+   "sig": "ac43c2e7f68e31780255113b038ea919b2e68e03350b3bacad177548ce910d26"
+  },
+  {
+   "input": "{\"v\": 1, \"type\": \"msg\", \"from\": \"b\", \"to\": \"c\", \"ts\": 1795070001.0, \"nonce\": \"n2\", \"body\": {\"text\": \"lunch at the samosa place? ✨ café സഫ് \\\"q\\\" \\\\ / \\n\\t\\u0001\\u001f  😀 end\"}}",
+   "canon": "{\"body\":{\"text\":\"lunch at the samosa place? ✨ café സഫ് \\\"q\\\" \\\\ / \\n\\t\\u0001\\u001f  😀 end\"},\"from\":\"b\",\"nonce\":\"n2\",\"to\":\"c\",\"ts\":1795070001.0,\"type\":\"msg\",\"v\":1}",
+   "sig": "7059cb6744e025528ef5d8228a40ecd1d117da347e7fba9d07adc2b9612b7b46"
+  },
+  {
+   "input": "{\"v\": 1, \"type\": \"call\", \"from\": \"b\", \"to\": null, \"ts\": 1e+16, \"nonce\": \"n3\", \"body\": {\"x\": 1e-05, \"y\": 0.1, \"z\": -2.5, \"w\": 0.0001, \"u\": 123456789.0, \"t\": 1.5e+300, \"s\": 2e-300, \"big\": 123456789012345678, \"neg\": -7, \"list\": [1, 2.0, \"3\", null, false, {\"b\": 1, \"a\": 2}]}}",
+   "canon": "{\"body\":{\"big\":123456789012345678,\"list\":[1,2.0,\"3\",null,false,{\"a\":2,\"b\":1}],\"neg\":-7,\"s\":2e-300,\"t\":1.5e+300,\"u\":123456789.0,\"w\":0.0001,\"x\":1e-05,\"y\":0.1,\"z\":-2.5},\"from\":\"b\",\"nonce\":\"n3\",\"to\":null,\"ts\":1e+16,\"type\":\"call\",\"v\":1}",
+   "sig": "fe53dca4bde1a6e0c6c7a6820beaaeb5ca09ce4021cc8ffe03dc907346356168"
+  },
+  {
+   "input": "{\"v\": 1, \"type\": \"msg\", \"from\": \"😀\", \"to\": \"d\", \"ts\": 1795070002.5, \"nonce\": \"n4\", \"body\": {}}",
+   "canon": "{\"body\":{},\"from\":\"😀\",\"nonce\":\"n4\",\"to\":\"d\",\"ts\":1795070002.5,\"type\":\"msg\",\"v\":1}",
+   "sig": "75df366dc16b6cfef1128191d385b657e2cbaf0ddc2c3a4c5bb32248524e3251"
+  }
+ ],
+ "teams": [
+  {
+   "code": "abcd1234ef",
+   "key": "e1d7f3340e0efbf519ec52120dd08e09e0f46056528815c15fc2bd105e99d75d",
+   "room": "2210ea61567a3b4c6588fec3",
+   "box": "ASOllzlkyAaIM5oa6JA6d82lMsNXx9M07qkv7bU7K0T2/SSiawZuKWFp4gYvJpXQ",
+   "plain": "hello abcd1234ef"
+  },
+  {
+   "code": "shared:https://blip.emilda.co",
+   "key": "b5011396824a7855b4a0b4306cbe72b757eb587dfc958c2cf55740340a59e8f3",
+   "room": "928e2272f58136dcad21f916",
+   "box": "IO2DUJMsEYE0xkbXOm8wzHUgAj2S0NADQMk1/FFkiFSdJ6ty3CF6szJnUmkD5ddrCFAYeWa+8JWga+xBbhh40a6iXw==",
+   "plain": "hello shared:https://blip.emilda.co"
+  },
+  {
+   "code": "team-സ",
+   "key": "9c347e94614d1f39b4b67dd3d3902036aa7811c5402217823aeafafd4af9058e",
+   "room": "d61089bf75677b915a6d6629",
+   "box": "mYGcKMw+YYa1qnioPdBBJ/gKoS61QzXQ6V6RjkfoqgQUgZyhGj4GeOQ/GvtCiw==",
+   "plain": "hello team-സ"
+  }
+ ],
+ "links": [
+  {
+   "text": "https://blip.emilda.co",
+   "parsed": {
+    "url": "wss://blip.emilda.co/ws",
+    "team": "",
+    "web": "https://blip.emilda.co",
+    "host": "blip.emilda.co"
+   },
+   "team_for": "shared:https://blip.emilda.co"
+  },
+  {
+   "text": "https://blip.emilda.co/#team=abcd1234",
+   "parsed": {
+    "url": "wss://blip.emilda.co/ws",
+    "team": "abcd1234",
+    "web": "https://blip.emilda.co",
+    "host": "blip.emilda.co"
+   },
+   "team_for": "abcd1234"
+  },
+  {
+   "text": "blip.emilda.co",
+   "parsed": {
+    "url": "wss://blip.emilda.co/ws",
+    "team": "",
+    "web": "https://blip.emilda.co",
+    "host": "blip.emilda.co"
+   },
+   "team_for": "shared:https://blip.emilda.co"
+  },
+  {
+   "text": "192.168.1.200:30620",
+   "parsed": {
+    "url": "ws://192.168.1.200:30620/ws",
+    "team": "",
+    "web": "http://192.168.1.200:30620",
+    "host": "192.168.1.200"
+   },
+   "team_for": "shared:http://192.168.1.200:30620"
+  },
+  {
+   "text": "192.168.1.200",
+   "parsed": {
+    "url": "ws://192.168.1.200:47620/ws",
+    "team": "",
+    "web": "http://192.168.1.200:47620",
+    "host": "192.168.1.200"
+   },
+   "team_for": "shared:http://192.168.1.200:47620"
+  },
+  {
+   "text": "http://nas.local:8080/",
+   "parsed": {
+    "url": "ws://nas.local:8080/ws",
+    "team": "",
+    "web": "http://nas.local:8080",
+    "host": "nas.local"
+   },
+   "team_for": "shared:http://nas.local:8080"
+  },
+  {
+   "text": "ws://h:1/ws",
+   "parsed": {
+    "url": "ws://h:1/ws",
+    "team": "",
+    "web": "http://h:1",
+    "host": "h"
+   },
+   "team_for": "shared:http://h:1"
+  },
+  {
+   "text": "ftp://x",
+   "parsed": null,
+   "team_for": ""
+  },
+  {
+   "text": "",
+   "parsed": null,
+   "team_for": ""
+  },
+  {
+   "text": "localhost:9000#team=xyz9",
+   "parsed": {
+    "url": "ws://localhost:9000/ws",
+    "team": "xyz9",
+    "web": "http://localhost:9000",
+    "host": "localhost"
+   },
+   "team_for": "xyz9"
+  },
+  {
+   "text": "https://Blip.Emilda.co/",
+   "parsed": {
+    "url": "wss://Blip.Emilda.co/ws",
+    "team": "",
+    "web": "https://Blip.Emilda.co",
+    "host": "Blip.Emilda.co"
+   },
+   "team_for": "shared:https://blip.emilda.co"
+  }
+ ],
+ "voice": {
+  "call_id": "call9",
+  "nonce": "00112233445566778899aabbccddeeff",
+  "enc": "dc1c2cd044c3af52f9ae1a72b6d56a25c800cdb922eebf2cdd4ee872ab86477f",
+  "mac": "2c9d4e118eb8b5007100c4e6e19a2ba563e7109cb938cc357886f4be54d81535",
+  "dir": 1,
+  "seq": 77,
+  "pcm": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+  "packet": "425631010000004d4893e52bdad7ae4776609938caf20653b02b1c5eef5e040c55d280d081ee2f2ecee547fbfbc73434eb5d8c18c069d7553dcbdb9a5d87e0341fd8fe721de090975030c0af308af1abdd77b8235b0a01649a01645a3db13b917c3518755bc3ca6f5889857a460be19cffbd63f669dc30b50ac5dc11006f497c484a598da6a41480763536e9371a07bf1715dcb0209df43db4e8216af49dd2eff57762e4c2eec530bf92b09561cf0498c71a01e83066c4bfff69e326cfd93b524b936292706651275d819f379da95f12d6eda5bdbee3595a3231c8d3169cd144f2bf048e5de85a83cde14522cf3d3d2cc0c462120c62edb6b70aa40281c9f38302235ced353a8631300fb12e60336c9fb6be470489eb36771108606f8af20db73d420263f1c64d53ba9a5f5c63af335152b6967c896473c6e8980cce320730e3329d1626bcb1afa7ccece5b02206c539df4c56a106da267bacea60cf4dcc9816a258e2dd51311c374fd64e933507c1114edef6f7e50d829d919f2c31dd0c32a38dae8010a651e97da5de6129064ac11d3c3ef7e9cf9cf63891536d1052471dcf63541ea979c6b29f58bc1c72ec745917dd4d922c802953b700a42d121890eddc78da9a5cfcf47ff7b5f36d1b663193128fe33f775e893d58b0de7d7072f481bfb94497db97d8bfc0c016102cb39606fdbad0bcbc0d18fd1f871cfa90201c0b08f047bb061ad28e227b265616e87adb90092272f293bb8730cd27e9d9a83fc729816ebc334c6e5054095545e42b7b6f04611c1901f4edf17a991d40005e39ddec05732c5e986bebc621244cb7a25685c5a6f1dffbb157f3b3bcf4e7f05fba646c4801c1e531432e6fc35b699fc343272cb1d715ddb1af9567fac2b86404dbce13e9a3c5101a1c78ffddddf7baccd099ab"
+ }
+}

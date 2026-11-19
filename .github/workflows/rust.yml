@@ -1,0 +1,35 @@
+name: rust
+
+# The Rust port: its own tests, plus the Python test suite run against the Rust server,
+# which proves today's Python pets work with it unchanged.
+on:
+  push:
+    paths: ["rust/**", "tests/**", "blip/**", "Dockerfile", ".github/workflows/rust.yml"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Rust tests (wire format matches Python byte for byte)
+        working-directory: rust
+        run: cargo test --workspace
+
+      - name: Build the server
+        working-directory: rust
+        run: cargo build --release -p blip-server
+
+      - name: Python pets through the Rust server
+        env:
+          BLIP_SERVER_BIN: rust/target/release/blip-server
+        run: python -m unittest tests.test_net tests.test_voice -v
+
+      - name: Docker image builds
+        run: docker build -t blip-server . && docker run -d --name s -p 47620:47620 blip-server && sleep 2 && curl -fsS http://127.0.0.1:47620/health

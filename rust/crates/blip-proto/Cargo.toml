@@ -1,0 +1,14 @@
+[package]
+name = "blip-proto"
+description = "Blip's wire format: signed envelopes, team encryption, voice packets. Byte-compatible with the Python Blip."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+sha2.workspace = true
+hmac.workspace = true
+blake2b_simd.workspace = true
+base64.workspace = true
+getrandom.workspace = true
