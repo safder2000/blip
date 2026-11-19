@@ -7,3 +7,4 @@ blip/_build.py
 assets/blip.iconset/
 assets/blip.icns
 .venv/
+vendor/

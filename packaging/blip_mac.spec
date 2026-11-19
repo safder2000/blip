@@ -5,7 +5,9 @@ import os
 ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
 VERSION = os.environ.get("VERSION", "0.0.0")
 
-a = Analysis([os.path.join(ROOT, "blip_main.pyw")], pathex=[ROOT], hiddenimports=["sounddevice", "certifi"])
+OPUS = os.path.join(ROOT, "vendor", "libopus.0.dylib")      # built by the workflow
+a = Analysis([os.path.join(ROOT, "blip_main.pyw")], pathex=[ROOT], hiddenimports=["sounddevice", "certifi"],
+             binaries=[(OPUS, ".")] if os.path.exists(OPUS) else [])
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="Blip", console=False, argv_emulation=False)
 coll = COLLECT(exe, a.binaries, a.datas, name="Blip")

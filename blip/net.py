@@ -2,11 +2,12 @@
 
 Every packet is a JSON envelope signed with HMAC-SHA256 using a key derived from the
 office passphrase, so only pets that share the passphrase see or hear each other.
-If broadcast is blocked between subnets, set a relay (see blip/relay.py) and/or list
-peer IPs directly.
+Pets can also meet through a Blip server (blip/server.py) over the internet: everything sent
+that way is encrypted end to end with the team code from the invite link.
 """
 import hashlib
 import hmac
+import base64
 import ipaddress
 import json
 import socket
@@ -14,6 +15,9 @@ import sys
 import threading
 import time
 import uuid
+
+from . import link as _link
+from .plat import ssl_context
 
 UDP_PORT = 47610
 TCP_PORT = 47611
@@ -79,7 +83,7 @@ class Net:
     kind = 'peers' (data None) or a message type ('call', 'call_cancel', 'call_reply', 'msg') with the envelope."""
 
     def __init__(self, node_id, profile, passphrase, on_event, udp_port=UDP_PORT, tcp_port=TCP_PORT,
-                 announce_port=None, relay="", manual_peers=()):
+                 announce_port=None, server="", team="", manual_peers=()):
         self.id = node_id
         self.profile = profile          # callable -> dict(name, status, stage, palette, ver)
         self.key = key_from_passphrase(passphrase)
@@ -88,7 +92,13 @@ class Net:
         self.announce_port = announce_port or udp_port
         self.want_tcp_port = tcp_port
         self.tcp_port = None
-        self.relay_addr = relay.strip()
+        info = _link.parse(server) if server else None
+        self.server_url = info["url"] if info else ""
+        team = team or (info or {}).get("team") or ""
+        self.tkey = _link.team_key(team) if team else None
+        self.room = _link.room_id(self.tkey) if team else None
+        self.link = None
+        self.on_voice = None           # (src, packet) for call audio arriving through the server
         self.manual = [p.strip() for p in manual_peers if p.strip()]
         self.peers = {}
         self.learned = set()           # IPs other pets told us about
@@ -96,8 +106,6 @@ class Net:
         self.nonces = {}
         self.running = False
         self.udp = self.tcp = None
-        self.relay_sock = None
-        self.relay_lock = threading.Lock()
         self.wake = threading.Event()
         self.error = None
 
@@ -127,8 +135,10 @@ class Net:
             return False
         for fn in (self._udp_loop, self._tcp_loop, self._announce_loop):
             threading.Thread(target=fn, daemon=True).start()
-        if self.relay_addr:
-            threading.Thread(target=self._relay_loop, daemon=True).start()
+        if self.server_url and self.tkey:
+            self.link = _link.ServerLink(self.server_url, self._server_message,
+                                         on_connect=lambda: self._server_send(self._hello()),
+                                         ssl_context=ssl_context()).start()
         return True
 
     def stop(self):
@@ -139,7 +149,10 @@ class Net:
         except Exception:
             pass
         self.running = False
-        for s in (self.udp, self.tcp, self.relay_sock):
+        if self.link:
+            self._server_send(self._env("bye"))
+            self.link.stop()
+        for s in (self.udp, self.tcp):
             try:
                 if s:
                     s.close()
@@ -176,8 +189,8 @@ class Net:
                     self.learned.add(str(a))
                     self.wake.set()
 
-    def _accept(self, d):
-        if not isinstance(d, dict) or not check(self.key, d):
+    def _accept(self, d, key=None):
+        if not isinstance(d, dict) or not check(key or self.key, d):
             return False
         if d.get("from") == self.id or d.get("to") not in (None, self.id):
             return False
@@ -196,8 +209,8 @@ class Net:
                 self.nonces = {k: t for k, t in self.nonces.items() if now - t < MAX_SKEW}
         return True
 
-    def _handle(self, d, ip, via):
-        if not self._accept(d):
+    def _handle(self, d, ip, via, key=None):
+        if not self._accept(d, key):
             return
         typ, src, body = d.get("type"), d["from"], d.get("body") or {}
         if typ == "hello":
@@ -211,14 +224,16 @@ class Net:
                 p.update(name=str(body.get("name", "?"))[:24], status=body.get("status", "available"),
                          stage=body.get("stage"), palette=body.get("palette"), ver=body.get("ver"),
                          port=int(body.get("port") or TCP_PORT), seen=time.time(),
-                         species=body.get("species"), voice=bool(body.get("voice")))
-            self._learn(body.get("peers"))
+                         species=body.get("species"), voice=bool(body.get("voice")),
+                         opus=bool(body.get("opus")))
+            if via == "lan":
+                self._learn(body.get("peers"))
             if new and d.get("to") is None:
                 reply = self._hello(to=src)
                 if via == "lan" and ip:
                     self._send_udp(reply, ip)
                 else:
-                    self._relay_send(reply)
+                    self._server_send(reply)
             self.on_event("peers", None)
             return
         if typ == "bye":
@@ -252,8 +267,8 @@ class Net:
             env = self._env(typ, pid, body)
             if p and p.get("via") == "lan" and p.get("ip"):
                 ok = self._send_tcp(p["ip"], p.get("port") or TCP_PORT, env)
-            if not ok and self.relay_sock:
-                ok = self._relay_send(env)
+            if not ok and self.link and self.link.connected():
+                ok = self._server_send(env)
             if done:
                 done(ok)
         threading.Thread(target=work, daemon=True).start()
@@ -284,7 +299,8 @@ class Net:
     def _announce_loop(self):
         while self.running:
             self._send_udp_all(self._hello())
-            self._relay_send(self._hello())
+            if self.link and self.link.connected():
+                self._server_send(self._hello())
             self.wake.wait(HELLO_EVERY)
             self.wake.clear()
 
@@ -332,45 +348,52 @@ class Net:
             if ok:
                 self._handle(d, ip, "lan")
 
-    # ------------------------------------------------ relay
-    def _relay_send(self, env):
-        s = self.relay_sock
-        if not s:
+    # ------------------------------------------------ online server
+    def _server_send(self, env):
+        """Send a signed envelope through the server, encrypted for the team."""
+        link = self.link
+        if not link or not link.connected():
             return False
-        try:
-            with self.relay_lock:
-                s.sendall(json.dumps(env).encode("utf-8") + b"\n")
-            return True
-        except OSError:
-            return False
+        env = {k: v for k, v in env.items() if k != "sig"}
+        if env.get("type") == "hello":           # office IPs mean nothing to other networks
+            env["body"] = {k: v for k, v in (env.get("body") or {}).items() if k != "peers"}
+        env = seal(self.tkey, env)                # team key: only teammates can check it
+        data = json.dumps(env, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        return link.send({"room": self.room, "from": self.id, "to": env.get("to"),
+                          "box": _link.box(self.tkey, data)})
 
-    def _relay_loop(self):
-        host, _, port = self.relay_addr.partition(":")
-        port = int(port or RELAY_PORT)
-        while self.running:
-            try:
-                s = socket.create_connection((host, port), timeout=6)
-                s.settimeout(None)
-                self.relay_sock = s
-                self._relay_send(self._hello())
-                buf = b""
-                while self.running:
-                    chunk = s.recv(8192)
-                    if not chunk:
-                        break
-                    buf += chunk
-                    while b"\n" in buf:
-                        line, buf = buf.split(b"\n", 1)
-                        try:
-                            self._handle(json.loads(line.decode("utf-8")), None, "relay")
-                        except (ValueError, UnicodeDecodeError):
-                            pass
-                    if len(buf) > MAX_FRAME:
-                        buf = b""
-            except OSError:
-                pass
-            self.relay_sock = None
-            for _ in range(20):
-                if not self.running:
-                    return
-                time.sleep(0.5)
+    def server_voice(self, pid, packet):
+        """Call audio through the server (already encrypted by the voice session)."""
+        link = self.link
+        if link:
+            link.send({"room": self.room, "from": self.id, "to": pid,
+                       "v": base64.b64encode(packet).decode("ascii")})
+
+    def _server_message(self, d):
+        src = d.get("from")
+        if "v" in d:
+            if self.on_voice and isinstance(src, str):
+                try:
+                    self.on_voice(src, base64.b64decode(d["v"]))
+                except (ValueError, TypeError):
+                    pass
+            return
+        raw = _link.unbox(self.tkey, d.get("box") or "")
+        if raw is None:
+            return
+        try:
+            env = json.loads(raw.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            return
+        if isinstance(env, dict) and env.get("from") == src:
+            self._handle(env, None, "server", key=self.tkey)
+
+    def server_state(self):
+        """('off'|'connecting'|'connected'|'error', detail)."""
+        if not self.link:
+            return "off", ""
+        return self.link.state, self.link.error
+
+    def key_for(self, pid):
+        p = self.peer(pid)
+        return self.tkey if p and p.get("via") == "server" else self.key

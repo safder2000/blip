@@ -223,11 +223,12 @@ class PopMenu:
                 cv.create_rectangle(X, Y, X + sp, Y + sp, fill=c, width=0, tags="fg")
         tx = ax + round(34 * S)
         busy = pr.get("status") == "busy"
-        cv.create_text(tx, (y0 + y1) / 2 - (round(6 * S) if busy else 0), text=it["label"], font=kit.F["body"],
+        sub = "busy" if busy else ("online" if pr.get("via") == "server" else "")
+        cv.create_text(tx, (y0 + y1) / 2 - (round(6 * S) if sub else 0), text=it["label"], font=kit.F["body"],
                        fill=kit.INK, anchor="w", tags="fg")
-        if busy:
-            cv.create_text(tx, (y0 + y1) / 2 + round(8 * S), text="busy", font=kit.F["tiny"], fill=kit.WARN,
-                           anchor="w", tags="fg")
+        if sub:
+            cv.create_text(tx, (y0 + y1) / 2 + round(8 * S), text=sub, font=kit.F["tiny"],
+                           fill=kit.WARN if busy else kit.MUTED, anchor="w", tags="fg")
         for bx0, by0, bx1, by1, i in self.person_buttons(y0, y1, it):
             icon, cmd, en, _tip = it["buttons"][i]
             hov = self.hl == ("btn", id(it), i) and en

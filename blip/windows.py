@@ -444,6 +444,31 @@ class SettingsWindow(kit.Window):
         if private:
             self.priv_box.pack(fill="x")
 
+        section(f, "Online server (optional)")
+        c4 = Card(f)
+        c4.pack(fill="x")
+        b4 = c4.body
+        muted(b4, "Talk to teammates anywhere: paste the invite link someone shared, or type a server's "
+                  "IP and port. Messages and calls are encrypted end to end; the server can't read them.",
+              wraplength=round(420 * S)).pack(anchor="w")
+        self.srv_field = Field(b4, cfg.get("server", ""), width=40,
+                               placeholder="https://blip.example.com/#team=...  or  192.168.1.200:30620",
+                               on_commit=self._set_server)
+        self.srv_field.pack(fill="x", pady=(round(10 * S), 0))
+        st = tk.Frame(b4, bg=kit.SURFACE)
+        st.pack(fill="x", pady=(round(8 * S), 0))
+        self.srv_dot = tk.Canvas(st, width=round(8 * S), height=round(8 * S), bg=kit.SURFACE, highlightthickness=0)
+        self.srv_dot.pack(side="left", padx=(0, round(6 * S)))
+        self.srv_label = label(st, "", "small", kit.MUTED)
+        self.srv_label.pack(side="left")
+        btns = tk.Frame(b4, bg=kit.SURFACE)
+        btns.pack(fill="x", pady=(round(10 * S), 0))
+        self.srv_copy = Btn(btns, "Copy invite link", self._copy_invite, kind="soft", small=True, icon="open")
+        self.srv_copy.pack(side="left")
+        self.srv_leave = Btn(btns, "Disconnect", lambda: self._set_server(""), kind="ghost", small=True, icon="x")
+        self.srv_leave.pack(side="left", padx=(round(6 * S), 0))
+        self._srv_shown = None
+
         section(f, "Other floors (optional)")
         c3 = Card(f)
         c3.pack(fill="x")
@@ -454,12 +479,45 @@ class SettingsWindow(kit.Window):
         r.pack(fill="x", pady=(round(10 * S), 0))
         Field(r.right, cfg["manual_peers"], width=18, placeholder="192.168.1.20",
               on_commit=lambda v: (self._cfg(manual_peers=v.strip()), self._restart_net())).pack()
-        kit.hline(b3)
-        r = SettingRow(b3, "Relay", "host:port of a Blip relay, if you run one.")
-        r.pack(fill="x")
-        Field(r.right, cfg["relay"], width=18, placeholder="server:47620",
-              on_commit=lambda v: (self._cfg(relay=v.strip()), self._restart_net())).pack()
         self.refresh_office()
+
+    def _set_server(self, text):
+        from . import link
+        text = (text or "").strip()
+        cfg = self.app.cfg
+        if not text:
+            if cfg.get("server"):
+                self._cfg(server="")
+                self.app.restart_net()
+            self.srv_field.set("")
+            self._srv_shown = None
+            return
+        info = link.parse(text)
+        if not info:
+            self.srv_label.config(text="That doesn't look like a link or an address.", fg=kit.DANGER)
+            self._srv_shown = ("bad",)
+            return
+        team = info["team"] or (cfg.get("team") if cfg.get("server") else "") or link.new_team_code()
+        base = info["web"] if not text.startswith(("ws://", "wss://")) else text.split("#")[0]
+        if base == cfg.get("server") and team == cfg.get("team"):
+            self.srv_field.set(base)
+            return
+        self._cfg(server=base, team=team)
+        self.srv_field.set(base)
+        self._srv_shown = None
+        self.app.restart_net()
+
+    def _copy_invite(self):
+        from . import link
+        cfg = self.app.cfg
+        info = link.parse(cfg.get("server", ""))
+        if not info or not cfg.get("team"):
+            return
+        inv = link.invite_link(info, cfg["team"])
+        self.top.clipboard_clear()
+        self.top.clipboard_append(inv)
+        self.srv_label.config(text="Invite link copied. Send it to your team.", fg=kit.OK)
+        self._srv_shown = ("copied", time.time())
 
     def _private(self, on):
         if on:
@@ -486,7 +544,42 @@ class SettingsWindow(kit.Window):
             self.top.after_cancel(self.net_restart_job)
         self.net_restart_job = self.top.after(600, self.app.restart_net)
 
+    def refresh_server(self):
+        lab = getattr(self, "srv_label", None)
+        if not lab or not lab.winfo_exists():
+            return
+        if self._srv_shown and self._srv_shown[0] == "bad":
+            return
+        if self._srv_shown and self._srv_shown[0] == "copied" and time.time() - self._srv_shown[1] < 4:
+            return
+        app = self.app
+        on = bool(app.cfg.get("server"))
+        state, detail = app.net.server_state() if app.net else ("off", "")
+        if not on:
+            text, col = "Not connected. Your pet only meets pets on this network.", kit.MUTED
+        elif state == "connected":
+            n = sum(1 for p in app.net.online() if p.get("via") == "server")
+            from . import link
+            host = (link.parse(app.cfg["server"]) or {}).get("host", "server")
+            text, col = f"Connected to {host}  \u00b7  {n} teammate{'s' if n != 1 else ''} online", kit.OK
+        elif state == "error":
+            text, col = f"Can't connect: {detail}. Trying again\u2026", kit.DANGER
+        else:
+            text, col = "Connecting\u2026", kit.WARN
+        shown = (text, col)
+        if shown == self._srv_shown:
+            return
+        self._srv_shown = shown
+        lab.config(text=text, fg=col)
+        d = self.srv_dot
+        d.delete("all")
+        n = round(8 * self.S)
+        pixel_box(d, 0, 0, n, n, 1, col)
+        self.srv_copy.set_enabled(on)
+        self.srv_leave.set_enabled(on)
+
     def refresh_office(self):
+        self.refresh_server()
         app = self.app
         txt = app.net_status()
         n = len(app.net.online()) if app.net else 0

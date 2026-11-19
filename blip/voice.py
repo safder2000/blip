@@ -1,7 +1,7 @@
-"""Voice calls between pets on the office network.
+"""Voice calls between pets.
 
-16 kHz mono, 20 ms frames, straight from one PC to the other over UDP (nothing leaves the
-office network). Each call gets its own keys, derived from the office group key and a random
+16 kHz mono, 20 ms frames. On the office network audio goes straight from one PC to the
+other over UDP; between networks it goes through the Blip server, compressed with Opus. Each call gets its own keys, derived from the office group key and a random
 nonce; every packet is encrypted (BLAKE2b keystream) and authenticated (BLAKE2b MAC), so
 other machines can neither listen in nor inject audio.
 """
@@ -28,6 +28,12 @@ PREBUFFER = 3                  # frames to collect before playback starts
 MAX_BUFFER = 12
 SILENCE = bytes(FRAME * 2)
 IDLE_TIMEOUT = 15.0
+
+
+def codecs():
+    """Codecs this PC can do, best first."""
+    from . import opus
+    return ["opus", "pcm"] if opus.available() else ["pcm"]
 
 
 def available():
@@ -98,13 +104,24 @@ def level(pcm):
 class VoiceSession:
     """One side of a call. role 0 = caller, 1 = the person who answered."""
 
-    def __init__(self, keys, role, peer=None, on_end=None, audio=True):
+    def __init__(self, keys, role, peer=None, on_end=None, audio=True, transport=None, codec="pcm"):
+        """transport: None = UDP straight to `peer`; or a callable(packet) that sends through the
+        server (incoming packets are then handed to feed())."""
         self.keys, self.role, self.peer = keys, role, peer
         self.on_end = on_end
         self.audio = audio and sd is not None
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.bind(("0.0.0.0", 0))
-        self.port = self.sock.getsockname()[1]
+        self.transport = transport
+        self.codec = codec
+        self.enc = self.dec = None
+        if codec == "opus":
+            from . import opus
+            self.enc, self.dec = opus.Encoder(), opus.Decoder()
+        self.sock = None
+        self.port = None
+        if transport is None:
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.sock.bind(("0.0.0.0", 0))
+            self.port = self.sock.getsockname()[1]
         self.seq = 0
         self.rx = collections.deque()
         self.playing = False
@@ -122,7 +139,8 @@ class VoiceSession:
     # ------------------------------------------------ lifecycle
     def start(self):
         self.running = True
-        threading.Thread(target=self._recv_loop, daemon=True).start()
+        if self.sock:
+            threading.Thread(target=self._recv_loop, daemon=True).start()
         threading.Thread(target=self._keepalive, daemon=True).start()
         if self.audio:
             try:
@@ -147,24 +165,36 @@ class VoiceSession:
                     s.close()
             except Exception:
                 pass
-        try:
-            self.sock.close()
-        except OSError:
-            pass
+        if self.sock:
+            try:
+                self.sock.close()
+            except OSError:
+                pass
+        for c in (self.enc, self.dec):
+            if c:
+                c.close()
 
     def seconds(self):
         return time.time() - self.started
 
     # ------------------------------------------------ sending
     def send_frame(self, pcm):
-        peer = self.peer
-        if not peer or not self.running:
+        if not self.running or (self.transport is None and not self.peer):
             return
         with self.lock:
             seq = self.seq
             self.seq += 1
+            if self.enc and len(pcm) == FRAME * 2:
+                try:
+                    pcm = self.enc.encode(pcm)
+                except RuntimeError:
+                    return
+        packet = seal(self.keys, self.role, seq, pcm)
+        if self.transport is not None:
+            self.transport(packet)
+            return
         try:
-            self.sock.sendto(seal(self.keys, self.role, seq, pcm), peer)
+            self.sock.sendto(packet, self.peer)
         except OSError:
             pass
 
@@ -177,7 +207,7 @@ class VoiceSession:
         """Keep the line open (and let the other side learn our address) even without a mic."""
         while self.running:
             if self.inp is None:
-                self.send_frame(SILENCE[:64])
+                self.send_frame(b"")           # "still here", no audio
             if time.time() - self.last_rx > IDLE_TIMEOUT and self.received:
                 self._end("lost")
                 return
@@ -190,24 +220,41 @@ class VoiceSession:
                 data, addr = self.sock.recvfrom(4096)
             except OSError:
                 return
-            got = open_packet(self.keys, data)
-            if not got:
-                continue
-            direction, seq, pcm = got
-            if direction == self.role:
-                continue                   # our own direction reflected back: ignore
-            self.last_rx = time.time()
-            self.received += 1
-            if self.peer is None:
+            if self.feed(data) and self.peer is None:
                 self.peer = addr           # learn where to send, from the first genuine packet
-            if seq <= self.last_seq or len(pcm) < 2:
-                continue
-            self.last_seq = seq
-            if len(pcm) == FRAME * 2:
-                self.level_out = level(pcm)
-                self.rx.append(pcm)
-                while len(self.rx) > MAX_BUFFER:
-                    self.rx.popleft()
+
+    def feed(self, data):
+        """Handle one packet (from UDP or the server). True if it was a genuine one from the other side."""
+        if not self.running:
+            return False
+        got = open_packet(self.keys, data)
+        if not got:
+            return False
+        direction, seq, payload = got
+        if direction == self.role:
+            return False                   # our own direction reflected back: ignore
+        self.last_rx = time.time()
+        self.received += 1
+        if seq <= self.last_seq or len(payload) < 3:
+            return True                    # late, duplicate or keepalive
+        if self.dec:
+            if seq > self.last_seq + 1 and self.last_seq >= 0 and seq - self.last_seq < 4:
+                for _ in range(seq - self.last_seq - 1):     # smooth over a few lost frames
+                    fill = self.dec.decode(None)
+                    if fill:
+                        self.rx.append(fill)
+            pcm = self.dec.decode(payload)
+            if not pcm:
+                return True
+        else:
+            pcm = payload
+        self.last_seq = seq
+        if len(pcm) == FRAME * 2:
+            self.level_out = level(pcm)
+            self.rx.append(pcm)
+            while len(self.rx) > MAX_BUFFER:
+                self.rx.popleft()
+        return True
 
     def _out_cb(self, outdata, frames, t, status):
         need = frames * 2

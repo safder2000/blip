@@ -23,12 +23,8 @@ Nothing else is needed: Python is bundled inside the app. Blip updates itself.
 Right-click the pet for everything: care, timers, colleagues, settings.
 Drag to move it, fling it to throw it.
 
-Pets on the same network find each other automatically. If colleagues are on another network,
-run a relay on a machine everyone can reach and enter its address in Settings → Office → Relay:
-
-```
-python -m blip.relay
-```
+Pets on the same network find each other automatically. To reach teammates elsewhere, paste a
+server's invite link in Settings → Office → Online server. To host your own server, see [SERVER.md](SERVER.md).
 
 ## Data
 

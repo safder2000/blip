@@ -5,7 +5,8 @@ import unittest
 import uuid
 
 from blip.net import Net, check, key_from_passphrase, seal
-from blip.relay import Relay
+from blip import link as L
+from blip.server import Server
 
 
 def free_udp_port():
@@ -39,13 +40,13 @@ class Inbox:
             return [d for k, d in self.events if k == kind]
 
 
-def make(name, passphrase, udp, announce, relay="", manual=("127.0.0.1",)):
+def make(name, passphrase, udp, announce, server="", manual=("127.0.0.1",)):
     """udp=None picks a free port, retrying if another process grabs it first (busy CI machines)."""
     for attempt in range(8):
         port = free_udp_port() if udp is None else udp
         box = Inbox()
         n = Net(uuid.uuid4().hex, lambda: {"name": name, "status": "available", "ver": "t"}, passphrase, box,
-                udp_port=port, tcp_port=0, announce_port=announce, relay=relay, manual_peers=manual)
+                udp_port=port, tcp_port=0, announce_port=announce, server=server, manual_peers=manual)
         if n.start():
             return n, box
         if udp is not None:
@@ -111,26 +112,90 @@ class LanTests(unittest.TestCase):
         self.assertEqual(len(abox.of("msg")), 1)
 
 
-class RelayTests(unittest.TestCase):
-    def test_peers_meet_through_relay(self):
-        relay = Relay(port=0, host="127.0.0.1").start()
-        addr = f"127.0.0.1:{relay.port}"
-        dead = free_udp_port()   # nobody listens here, so no LAN path between the two
-        a, abox = make("Ann", "office", None, dead, relay=addr, manual=())
-        b, bbox = make("Ben", "office", None, dead, relay=addr, manual=())
-        try:
-            self.assertTrue(wait(lambda: any(p["name"] == "Ben" for p in a.online()), 10))
-            self.assertTrue(wait(lambda: any(p["name"] == "Ann" for p in b.online()), 10))
-            self.assertEqual(a.peer(b.id)["via"], "relay")
-            res = []
-            a.send(b.id, "msg", {"text": "lunch?"}, res.append)
-            self.assertTrue(wait(lambda: bbox.of("msg")))
-            self.assertEqual(bbox.of("msg")[0]["body"]["text"], "lunch?")
-            self.assertEqual(res, [True])
-        finally:
-            a.stop()
-            b.stop()
-            relay.stop()
+class ServerTests(unittest.TestCase):
+    def setUp(self):
+        self.srv = Server(port=0, host="127.0.0.1", log=None).start()
+        self.seen = []
+        self.srv.tap = self.seen.append
+        self.nets = []
+
+    def tearDown(self):
+        for n in self.nets:
+            n.stop()
+        self.srv.stop()
+
+    def pet(self, name, link):
+        dead = free_udp_port()      # nobody listens here, so there's no LAN path
+        n, box = make(name, "office", None, dead, server=link, manual=())
+        self.nets.append(n)
+        return n, box
+
+    def test_teammates_meet_and_talk_end_to_end_encrypted(self):
+        link = f"http://127.0.0.1:{self.srv.port}/#team=abcd1234ef"
+        a, abox = self.pet("Ann", link)
+        b, bbox = self.pet("Ben", link)
+        self.assertTrue(wait(lambda: any(p["name"] == "Ben" for p in a.online()), 10))
+        self.assertTrue(wait(lambda: any(p["name"] == "Ann" for p in b.online()), 10))
+        self.assertEqual(a.peer(b.id)["via"], "server")
+        self.assertEqual(a.server_state()[0], "connected")
+        res = []
+        a.send(b.id, "msg", {"text": "lunch at the samosa place?"}, res.append)
+        self.assertTrue(wait(lambda: bbox.of("msg")))
+        self.assertEqual(bbox.of("msg")[0]["body"]["text"], "lunch at the samosa place?")
+        self.assertEqual(res, [True])
+        raw = "".join(self.seen)
+        for secret in ("Ann", "Ben", "samosa", "office", "abcd1234ef"):
+            self.assertNotIn(secret, raw)          # the server only ever sees ciphertext
+        self.assertEqual(self.srv.stats()["teams"], 1)
+
+    def test_other_teams_stay_invisible(self):
+        a, _ = self.pet("Ann", f"127.0.0.1:{self.srv.port}#team=team-one-1")
+        c, _ = self.pet("Cat", f"127.0.0.1:{self.srv.port}#team=team-two-2")
+        self.assertTrue(wait(lambda: self.srv.stats()["teams"] == 2, 10))
+        time.sleep(1.0)
+        self.assertEqual(a.online(), [])
+        self.assertEqual(c.online(), [])
+
+    def test_voice_packets_go_through(self):
+        link = f"127.0.0.1:{self.srv.port}#team=voiceteam"
+        a, _ = self.pet("Ann", link)
+        b, _ = self.pet("Ben", link)
+        got = []
+        b.on_voice = lambda src, pkt: got.append((src, pkt))
+        self.assertTrue(wait(lambda: a.peer(b.id) is not None, 10))
+        a.server_voice(b.id, b"audio")
+        self.assertTrue(wait(lambda: got))
+        self.assertEqual(got[0], (a.id, b"audio"))
+
+    def test_status_page_and_health(self):
+        import json as _json
+        import urllib.request
+        base = f"http://127.0.0.1:{self.srv.port}"
+        self.assertIn("Blip server is running", urllib.request.urlopen(base + "/").read().decode())
+        self.assertTrue(_json.loads(urllib.request.urlopen(base + "/health").read())["ok"])
+
+
+class LinkTests(unittest.TestCase):
+    def test_parse(self):
+        p = L.parse("https://blip.example.com/#team=3f9c00aa")
+        self.assertEqual((p["url"], p["team"]), ("wss://blip.example.com/ws", "3f9c00aa"))
+        self.assertEqual(L.parse("blip.example.com")["url"], "wss://blip.example.com/ws")
+        self.assertEqual(L.parse("192.168.1.200:30620")["url"], "ws://192.168.1.200:30620/ws")
+        self.assertEqual(L.parse("192.168.1.200")["url"], "ws://192.168.1.200:47620/ws")
+        self.assertEqual(L.parse("http://nas.local:8080")["url"], "ws://nas.local:8080/ws")
+        self.assertIsNone(L.parse("ftp://x"))
+        self.assertIsNone(L.parse(""))
+        inv = L.invite_link(L.parse("192.168.1.200:30620"), "abc123")
+        self.assertEqual(inv, "http://192.168.1.200:30620/#team=abc123")
+        self.assertEqual(L.parse(inv)["team"], "abc123")
+
+    def test_box(self):
+        k = L.team_key("x")
+        t = L.box(k, b"hello there")
+        self.assertEqual(L.unbox(k, t), b"hello there")
+        self.assertIsNone(L.unbox(L.team_key("y"), t))
+        bad = t[:-4] + ("AAAA" if not t.endswith("AAAA") else "BBBB")
+        self.assertIsNone(L.unbox(k, bad))
 
 
 if __name__ == "__main__":

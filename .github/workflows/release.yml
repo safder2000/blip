@@ -43,8 +43,22 @@ jobs:
       - name: Tests
         run: python -m unittest discover -s tests -t . -v
 
+      - name: Get libopus (voice compression)
+        shell: pwsh
+        run: |
+          python -m pip download discord.py==2.4.0 --no-deps -d opusdl
+          New-Item -ItemType Directory -Force vendor | Out-Null
+          python -c "import zipfile,glob; z=zipfile.ZipFile(glob.glob('opusdl/*.whl')[0]); open('vendor/opus.dll','wb').write(z.read('discord/bin/libopus-0.x64.dll'))"
+
       - name: Build Blip.exe
-        run: pyinstaller --noconfirm --clean --windowed --name Blip --icon assets/blip.ico --hidden-import pystray._win32 blip_main.pyw
+        run: pyinstaller --noconfirm --clean --windowed --name Blip --icon assets/blip.ico --hidden-import pystray._win32 --add-binary "vendor/opus.dll;." blip_main.pyw
+
+      - name: Check the bundled Opus works
+        shell: pwsh
+        run: |
+          $p = Start-Process dist\Blip\Blip.exe -ArgumentList "--selftest-opus" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Write-Error "libopus missing from the build"; exit 1 }
+          "opus ok"
 
       - name: Build installer
         shell: pwsh
@@ -102,6 +116,17 @@ jobs:
           python packaging/make_icon.py --iconset
           iconutil -c icns assets/blip.iconset -o assets/blip.icns
 
+      - name: Build libopus (voice compression)
+        run: |
+          curl -fsSL -o opus.tar.gz https://downloads.xiph.org/releases/opus/opus-1.5.2.tar.gz             || curl -fsSL -o opus.tar.gz https://github.com/xiph/opus/releases/download/v1.5.2/opus-1.5.2.tar.gz
+          tar xzf opus.tar.gz
+          cmake -S opus-1.5.2 -B opus-build -DBUILD_SHARED_LIBS=ON -DCMAKE_BUILD_TYPE=Release             -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DCMAKE_OSX_ARCHITECTURES=arm64 -DOPUS_BUILD_TESTING=OFF -DOPUS_BUILD_PROGRAMS=OFF
+          cmake --build opus-build --config Release -j 4
+          mkdir -p vendor
+          cp "$(ls opus-build/libopus.*.dylib | head -1)" vendor/libopus.0.dylib
+          install_name_tool -id @rpath/libopus.0.dylib vendor/libopus.0.dylib
+          ls -la vendor
+
       - name: Build Blip.app
         run: pyinstaller --noconfirm --clean packaging/blip_mac.spec
 
@@ -115,6 +140,7 @@ jobs:
           # HTTPS must work from inside the bundle (updates, Basecamp) without the build machine's Python
           sudo mv /Library/Frameworks/Python.framework /tmp/pyfw-hidden 2>/dev/null || true
           ./dist/Blip.app/Contents/MacOS/Blip --selftest-https
+          ./dist/Blip.app/Contents/MacOS/Blip --selftest-opus
           sudo mv /tmp/pyfw-hidden /Library/Frameworks/Python.framework 2>/dev/null || true
           if [ -f "$HOME/Library/Application Support/Blip/error.log" ]; then cat "$HOME/Library/Application Support/Blip/error.log"; exit 1; fi
 

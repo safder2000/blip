@@ -50,6 +50,8 @@ DEFAULTS = {
     "passphrase": "blip-office",   # pets only see pets with the same passphrase
     "network": True,
     "dnd": False,
+    "server": "",                  # optional Blip server: invite link base, domain or ip:port
+    "team": "",                    # team code for the server (end-to-end key; never sent to the server)
     "relay": "",                   # optional "host:port" of a relay (blip.relay) when broadcast is blocked
     "manual_peers": "",            # optional comma-separated IPs to say hello to directly
     "sound": False,                # quiet by default; Settings > General > Sounds
@@ -89,6 +91,11 @@ class Config(dict):
             if not self.get("theme_chosen"):
                 self["theme"] = "system"
             self["cfg_version"] = 3
+            changed = True
+        if self.get("cfg_version", 1) < 4:   # v0.7: "relay" became the online server
+            if self.get("relay") and not self.get("server"):
+                self["server"] = self["relay"]
+            self["cfg_version"] = 4
             changed = True
         if changed:
             self.save()

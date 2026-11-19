@@ -1078,7 +1078,8 @@ class App:
     def profile(self):
         return {"name": self.cfg["display_name"], "status": "busy" if self.cfg["dnd"] else "available",
                 "stage": self.st["stage"], "palette": self.palette(), "species": self.species(),
-                "voice": bool(getattr(self, "voice_ok", False)), "ver": __version__}
+                "voice": bool(getattr(self, "voice_ok", False)), "opus": "opus" in voice.codecs(),
+                "ver": __version__}
 
     def refresh_icon(self):
         """Window icons show the current pet."""
@@ -1120,9 +1121,15 @@ class App:
             self.net = None
             return
         peers = [p for p in self.cfg["manual_peers"].replace(";", ",").split(",")]
+        server = self.cfg.get("server", "")
+        if server and not self.cfg.get("team"):
+            from .link import new_team_code
+            self.cfg["team"] = new_team_code()
+            self.cfg.save()
         self.net = Net(self.cfg["node_id"], self.profile, self.cfg["passphrase"],
                        lambda kind, d: self.post(self.on_net, kind, d),
-                       relay=self.cfg["relay"], manual_peers=peers)
+                       server=server, team=self.cfg.get("team", ""), manual_peers=peers)
+        self.net.on_voice = self._voice_packet
         if not self.net.start():
             self.net_error = self.net.error
             self.net = None
@@ -1142,8 +1149,10 @@ class App:
         if not self.net:
             return f"Network problem: {self.net_error}"
         n = len(self.net.online())
-        relay = "  - relay connected" if self.net.relay_sock else ("  - relay not reachable" if self.cfg["relay"] else "")
-        return f"{n} pet{'s' if n != 1 else ''} nearby{relay}"
+        state, _ = self.net.server_state()
+        srv = {"connected": "  - online", "connecting": "  - connecting to server",
+               "error": "  - server not reachable"}.get(state, "")
+        return f"{n} pet{'s' if n != 1 else ''} nearby{srv}"
 
     def set_dnd(self, on):
         self.cfg["dnd"] = bool(on)
@@ -1272,11 +1281,16 @@ class App:
         if isinstance(voice_info, dict) and self.voice_ok and not self.voice:
             p = self.net.peer(src) if self.net else None
             try:
-                port, nonce = int(voice_info["port"]), str(voice_info["nonce"])
+                nonce = str(voice_info["nonce"])
                 bytes.fromhex(nonce)
+                port = int(voice_info.get("port") or 0)
             except (KeyError, TypeError, ValueError):
-                port = None
-            if p and p.get("ip") and port:
+                nonce = port = None
+            codec = voice_info.get("codec") if voice_info.get("codec") in voice.codecs() else "pcm"
+            if nonce and voice_info.get("route") == "server" and p:
+                self.start_voice(src, name, cid, 0, nonce, None, route="server", codec=codec)
+                return
+            if nonce and p and p.get("ip") and port:
                 self.start_voice(src, name, cid, 0, nonce, (p["ip"], port))
                 return
         self.log_inbox("in", src, name, text)
@@ -1290,18 +1304,38 @@ class App:
     # ------------------------------------------------ voice calls
     def can_voice(self, pid):
         p = self.net.peer(pid) if self.net else None
-        return bool(self.voice_ok and not self.voice and p and p.get("voice") and p.get("via") == "lan")
+        return bool(self.voice_ok and not self.voice and p and p.get("voice")
+                    and p.get("via") in ("lan", "server"))
 
     def answer_voice(self, src, name, cid):
         nonce = voice.new_nonce()
-        sess = self.start_voice(src, name, cid, 1, nonce, None)
+        p = self.net.peer(src) or {}
+        if p.get("via") == "server":
+            codec = "opus" if p.get("opus") and "opus" in voice.codecs() else "pcm"
+            sess = self.start_voice(src, name, cid, 1, nonce, None, route="server", codec=codec)
+            info = {"nonce": nonce, "route": "server", "codec": codec}
+        else:
+            sess = self.start_voice(src, name, cid, 1, nonce, None)
+            info = {"port": sess.port if sess else 0, "nonce": nonce}
         if sess:
-            self.net.send(src, "call_reply", {"call_id": cid, "text": "Talking",
-                                              "voice": {"port": sess.port, "nonce": nonce}})
+            self.net.send(src, "call_reply", {"call_id": cid, "text": "Talking", "voice": info})
 
-    def start_voice(self, pid, name, cid, role, nonce, peer_addr):
-        keys = voice.session_keys(self.net.key, cid, nonce)
-        sess = voice.VoiceSession(keys, role, peer_addr, on_end=lambda why: self.post(self._voice_lost, cid))
+    def _voice_packet(self, src, packet):
+        """Call audio from the server (network thread): straight into the session."""
+        sess, info = self.voice, self.voice_call
+        if sess and info and info["peer"] == src:
+            sess.feed(packet)
+
+    def start_voice(self, pid, name, cid, role, nonce, peer_addr, route="lan", codec="pcm"):
+        net = self.net
+        keys = voice.session_keys(net.tkey if route == "server" else net.key, cid, nonce)
+        transport = (lambda pkt: net.server_voice(pid, pkt)) if route == "server" else None
+        try:
+            sess = voice.VoiceSession(keys, role, peer_addr, on_end=lambda why: self.post(self._voice_lost, cid),
+                                      transport=transport, codec=codec)
+        except RuntimeError:             # codec failed to load: fall back to raw audio
+            sess = voice.VoiceSession(keys, role, peer_addr, on_end=lambda why: self.post(self._voice_lost, cid),
+                                      transport=transport)
         try:
             sess.start()
         except OSError as e:
