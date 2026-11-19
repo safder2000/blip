@@ -32,4 +32,4 @@ jobs:
         run: python -m unittest tests.test_net tests.test_voice -v
 
       - name: Docker image builds
-        run: docker build -t blip-server . && docker run -d --name s -p 47620:47620 blip-server && sleep 2 && curl -fsS http://127.0.0.1:47620/health
+        run: docker build -t blip-server . && docker run -d --name blipsrv -p 47620:47620 blip-server && sleep 2 && curl -fsS http://127.0.0.1:47620/health
