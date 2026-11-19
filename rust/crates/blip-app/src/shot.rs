@@ -70,3 +70,23 @@ pub fn canvas(name: &str, cv: &blip_ui::Canvas) {
     }
     let _ = save_png(&std::path::Path::new(&dir).join(format!("{name}.png")), cv.w as u32, cv.h as u32, &rgba);
 }
+
+/// Like `canvas`, but at most every `secs` seconds per name.
+pub fn canvas_every(name: &str, cv: &blip_ui::Canvas, secs: f64) {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    static LAST: Mutex<Option<HashMap<String, f64>>> = Mutex::new(None);
+    if std::env::var_os("BLIP_SHOT").is_none() {
+        return;
+    }
+    let now = blip_core::now();
+    {
+        let mut g = LAST.lock().unwrap();
+        let m = g.get_or_insert_with(HashMap::new);
+        if m.get(name).map_or(false, |t| now - t < secs) {
+            return;
+        }
+        m.insert(name.to_string(), now);
+    }
+    canvas(name, cv);
+}

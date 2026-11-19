@@ -604,6 +604,7 @@ impl App {
         if let Some(w) = self.pet_win.as_mut() {
             w.present(&self.canvas, x, y);
         }
+        crate::shot::canvas_every("pet", &self.canvas, 2.0);
     }
 
     /// The face to draw (`mood()` in app.py).

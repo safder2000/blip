@@ -124,7 +124,40 @@ fn pet_rgba(look: &Look, size: u32) -> (Vec<u8>, u32) {
     (rgba, size as u32)
 }
 
+/// Release checks: `--selftest-opus` (bundled libopus encodes and decodes) and `--selftest-https`
+/// (TLS works from the installed app). Exit code 0 = fine.
+fn selftest(arg: &str) -> Option<i32> {
+    match arg {
+        "--selftest-opus" => {
+            let ok = (|| {
+                let mut e = opus::Encoder::new()?;
+                let mut d = opus::Decoder::new()?;
+                let frame: Vec<i16> = (0..opus::FRAME).map(|i| ((i as f64 * 0.2).sin() * 8000.0) as i16).collect();
+                let pkt = e.encode(&frame)?;
+                let out = d.decode(Some(&pkt))?;
+                Some(out.len() == opus::FRAME)
+            })()
+            .unwrap_or(false);
+            println!("opus {}", if ok { "ok" } else { "MISSING" });
+            Some(if ok { 0 } else { 1 })
+        }
+        "--selftest-https" => {
+            let ok = http::get_json("https://api.github.com/repos/safder2000/blip", None, "application/vnd.github+json").is_ok();
+            println!("https {}", if ok { "ok" } else { "FAILED" });
+            Some(if ok { 0 } else { 1 })
+        }
+        "--version" => {
+            println!("Blip {}", windows::VERSION);
+            Some(0)
+        }
+        _ => None,
+    }
+}
+
 fn main() {
+    if let Some(code) = std::env::args().nth(1).and_then(|a| selftest(&a)) {
+        std::process::exit(code);
+    }
     // one Blip at a time (same lock as the Python version, so they never run side by side);
     // a test run with its own data folder gets its own lock
     let name = if std::env::var_os("BLIP_DATA").is_some() { "BlipDesktopPetTest" } else { "BlipDesktopPet" };
