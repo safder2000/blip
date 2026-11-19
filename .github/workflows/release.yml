@@ -66,7 +66,8 @@ jobs:
         shell: pwsh
         run: |
           foreach ($t in "--selftest-opus", "--selftest-https") {
-            $p = Start-Process dist\Blip\Blip.exe -ArgumentList $t -Wait -PassThru
+            $p = Start-Process dist\Blip\Blip.exe -ArgumentList $t -Wait -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\selftest.txt"
+            Get-Content "$env:RUNNER_TEMP\selftest.txt"
             if ($p.ExitCode -ne 0) { Write-Error "$t failed"; exit 1 }
           }
           $env:BLIP_DATA = "$env:RUNNER_TEMP\blipdata"

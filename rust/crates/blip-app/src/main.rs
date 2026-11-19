@@ -146,7 +146,16 @@ fn selftest(arg: &str) -> Option<i32> {
         }
         "--selftest-https" => {
             // any HTTP answer proves TLS works (GitHub may rate-limit CI machines with 403)
-            let ok = !matches!(http::get_json("https://github.com/safder2000/blip", None, "text/html"), Err(http::Fail::Transport(_)));
+            let mut ok = false;
+            for url in ["https://api.github.com/repos/safder2000/blip", "https://github.com/safder2000/blip", "https://launchpad.37signals.com/"] {
+                match http::get_json(url, None, "application/json") {
+                    Err(http::Fail::Transport(e)) => println!("{url}: {e}"),
+                    _ => {
+                        println!("{url}: answered");
+                        ok = true;
+                    }
+                }
+            }
             println!("https {}", if ok { "ok" } else { "FAILED" });
             Some(if ok { 0 } else { 1 })
         }
