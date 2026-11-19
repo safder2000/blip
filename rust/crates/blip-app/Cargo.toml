@@ -17,6 +17,12 @@ blip-proto = { path = "../blip-proto" }
 chrono = "0.4"
 base64.workspace = true
 socket2 = "0.5"
+ureq = { version = "2.10", default-features = false, features = ["native-tls", "json"] }
+native-tls = "0.2"
+sha2.workspace = true
+libloading = "0.8"
+getrandom.workspace = true
+cpal = "0.15"
 tokio = { workspace = true }
 tokio-tungstenite = { workspace = true, features = ["native-tls"] }
 futures-util.workspace = true
@@ -32,7 +38,7 @@ raw-window-handle = "0.6"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_UI_HiDpi",
-    "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Registry", "Win32_Security_Authentication_Identity",
+    "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Registry", "Win32_Security_Authentication_Identity", "Win32_System_Threading",
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

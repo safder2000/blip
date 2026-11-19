@@ -272,6 +272,18 @@ impl Net {
         }
     }
 
+    /// Something that sends call audio to `pid` through the server, from any thread.
+    pub fn voice_sender(&self, pid: &str) -> Box<dyn Fn(&[u8]) + Send + Sync> {
+        let sh = self.sh.clone();
+        let pid = pid.to_string();
+        Box::new(move |packet: &[u8]| {
+            let m = json!({"room": sh.room, "from": sh.id, "to": pid, "v": base64::engine::general_purpose::STANDARD.encode(packet)});
+            if let Some(tx) = sh.to_server.lock().unwrap().as_ref() {
+                let _ = tx.send(m.to_string());
+            }
+        })
+    }
+
     /// The key a voice call with `pid` is sealed with (team key through the server).
     pub fn key_for(&self, pid: &str) -> Vec<u8> {
         match self.peer(pid) {

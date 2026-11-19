@@ -8,13 +8,16 @@ mod app;
 mod basecamp;
 mod cards;
 mod gui;
+mod http;
 mod net;
 mod office;
+mod opus;
 mod overlay;
 mod platform;
 mod shot;
 mod soft;
 mod sound;
+mod updater;
 mod voice;
 mod windows;
 
@@ -70,6 +73,16 @@ impl ApplicationHandler for Runner {
     }
 }
 
+/// Test log: with BLIP_LOG=<file>, append a line (used to check runs on the Mac over ssh).
+pub fn log(msg: &str) {
+    if let Some(p) = std::env::var_os("BLIP_LOG") {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) {
+            let _ = writeln!(f, "{:.1} {msg}", blip_core::now());
+        }
+    }
+}
+
 /// The tray / menu-bar icon: the pet, drawn small.
 pub fn tray_image(look: &Look) -> tray_icon::Icon {
     let (rgba, size) = pet_rgba(look, 32);
@@ -112,6 +125,12 @@ fn pet_rgba(look: &Look, size: u32) -> (Vec<u8>, u32) {
 }
 
 fn main() {
+    // one Blip at a time (same lock as the Python version, so they never run side by side);
+    // a test run with its own data folder gets its own lock
+    let name = if std::env::var_os("BLIP_DATA").is_some() { "BlipDesktopPetTest" } else { "BlipDesktopPet" };
+    if !platform::single_instance(name) {
+        return;
+    }
     #[allow(unused_mut)]
     let mut builder = EventLoop::builder();
     #[cfg(target_os = "macos")]

@@ -57,6 +57,10 @@ struct Tray {
 
 pub struct App {
     pub office: crate::office::Office,
+    pub bc: crate::basecamp::Basecamp,
+    pub updater: crate::updater::Updater,
+    pub voice: crate::voice::Voice,
+    next_theme: f64,
     pub cfg: Config,
     pub pet: Pet,
     pub body: Body,
@@ -135,6 +139,10 @@ impl App {
         let theme = theme::pick(cfg.str("theme"), platform::system_dark());
         let mut app = App {
             office: crate::office::Office::load(&dir),
+            bc: Default::default(),
+            updater: Default::default(),
+            voice: Default::default(),
+            next_theme: 0.0,
             cfg,
             timers: Timers::load(dir.join("timers.json")),
             notes: Notes::load(dir.join("notes.json")),
@@ -377,6 +385,22 @@ impl App {
         }
         self.tray_events(el);
         crate::office::tick(self, el);
+        crate::voice::tick(self, el);
+        crate::basecamp::tick(self, el);
+        crate::updater::tick(self, el);
+        if now >= self.next_theme {
+            // "Match system": follow the OS when it switches between light and dark
+            self.next_theme = now + 5.0;
+            let setting = self.cfg.str("theme").to_string();
+            if setting.is_empty() || setting == "system" {
+                let t = theme::pick(&setting, platform::system_dark());
+                if t.dark != self.theme.dark {
+                    self.theme = t;
+                    self.menu = None;
+                    self.windows_dirty = true;
+                }
+            }
+        }
         if !self.timed.is_empty() {
             let due: Vec<String> = self.timed.iter().filter(|(t, _)| *t <= now).map(|(_, c)| c.clone()).collect();
             self.timed.retain(|(t, _)| *t > now);
@@ -789,6 +813,17 @@ impl App {
             ]));
         }
         let mut extra = self.office_items();
+        if self.cfg.menu_on("basecamp") && crate::basecamp::connected(self) {
+            let due = self.bc.items.len();
+            extra.push(Item::Row {
+                icon: "task",
+                label: "Basecamp tasks".into(),
+                hint: if due > 0 { due.to_string() } else { String::new() },
+                check: None,
+                cmd: "window:tasks".into(),
+                enabled: true,
+            });
+        }
         if self.cfg.menu_on("dnd") {
             extra.push(Item::toggle("dnd", "Do not disturb", self.cfg.bool("dnd"), "dnd"));
         }
@@ -1032,8 +1067,35 @@ impl App {
                 self.quit = true;
                 el.exit();
             }
-            _ => crate::office::run(self, el, cmd),
+            _ => {
+                if crate::basecamp::run(self, el, cmd) || crate::updater::run(self, el, cmd) {
+                    return;
+                }
+                crate::office::run(self, el, cmd)
+            }
         }
+    }
+
+    /// Run a command `secs` seconds from now.
+    pub fn run_at(&mut self, secs: f64, cmd: &str) {
+        let t = self.now() + secs;
+        self.timed.push((t, cmd.to_string()));
+    }
+
+    /// Something got done (a Basecamp to-do): sparkles, a happy hop.
+    pub fn cheer_done(&mut self) {
+        self.spawn("spark", 6);
+        let now = self.now();
+        self.body.happy_until = now + 3.0;
+        self.board("Done!", 3.0);
+        self.chirp("wow", None, 3.0);
+        let h = self.pet.stat("happy");
+        self.pet.set_stat("happy", h + 5.0);
+    }
+
+    /// Ringing, calling or talking: not a good moment to restart for an update.
+    pub fn busy_with_people(&self) -> bool {
+        !self.alerts.is_empty() || crate::office::in_call(self) || crate::voice::active(self)
     }
 
     pub fn set_visible(&mut self, on: bool) {

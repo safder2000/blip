@@ -212,3 +212,19 @@ pub fn show_in_dock(show: bool) {
         }
     }
 }
+
+
+/// False if another Blip already runs (flock on the same file as the Python version).
+pub fn single_instance(name: &str) -> bool {
+    static LOCK: std::sync::OnceLock<std::fs::File> = std::sync::OnceLock::new();
+    let dir = data_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let Ok(f) = std::fs::OpenOptions::new().create(true).write(true).truncate(false).open(dir.join(format!("{name}.lock"))) else {
+        return true;
+    };
+    if f.try_lock().is_err() {
+        return false;
+    }
+    let _ = LOCK.set(f);
+    true
+}

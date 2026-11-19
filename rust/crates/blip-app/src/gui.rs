@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use blip_pet::pixfont;
 use blip_pet::sprites::{self, build_egg, build_pet, Color, PetLook, Sprite, Stage};
 use blip_ui::theme::Theme;
-use egui::{Align2, Color32, CornerRadius, FontFamily, FontId, Margin, Pos2, Rect, Response, RichText, Sense, Stroke, StrokeKind, Ui, Vec2};
+use egui::{Color32, CornerRadius, FontFamily, FontId, Margin, Pos2, Rect, Response, RichText, Sense, Stroke, StrokeKind, Ui, Vec2};
 use winit::dpi::{LogicalSize, PhysicalPosition};
 use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
@@ -212,6 +212,10 @@ impl GuiWin {
             }
             "down" | "up" => input.events.push(egui::Event::PointerButton { pos: self.last_pos, button: egui::PointerButton::Primary, pressed: k == "down", modifiers: m }),
             "type" => input.events.push(egui::Event::Text(a.to_string())),
+            "scroll" => {
+                let dy: f32 = a.parse().unwrap_or(-300.0);
+                input.events.push(egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: Vec2::new(0.0, dy), phase: egui::TouchPhase::Move, source: egui::MouseWheelSource::Unknown, modifiers: m });
+            }
             "key" => {
                 let key = match a {
                     "enter" => egui::Key::Enter,
@@ -597,8 +601,4 @@ pub fn empty_state(ui: &mut Ui, t: &Theme, title: &str, text: &str) {
         ui.label(RichText::new(text).color(c(t.muted)).size(12.5));
     });
     ui.add_space(8.0);
-}
-
-pub fn painter_text(ui: &Ui, pos: Pos2, text: &str, size: f32, col: Color32) {
-    ui.painter().text(pos, Align2::LEFT_TOP, text, FontId::proportional(size), col);
 }

@@ -204,3 +204,17 @@ pub fn open_path(path: &std::path::Path) {
 
 /// macOS only (the Dock icon); nothing to do on Windows.
 pub fn show_in_dock(_show: bool) {}
+
+
+/// False if another Blip already runs (a named mutex, like the Python version).
+pub fn single_instance(name: &str) -> bool {
+    use windows_sys::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
+    use windows_sys::Win32::System::Threading::CreateMutexW;
+    let n = wide(&format!("Local\\{name}"));
+    unsafe {
+        let h = CreateMutexW(std::ptr::null(), 0, n.as_ptr());
+        let err = GetLastError();
+        // the handle is kept open for the life of the process
+        h.is_null() || err != ERROR_ALREADY_EXISTS
+    }
+}

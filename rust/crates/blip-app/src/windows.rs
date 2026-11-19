@@ -75,7 +75,7 @@ pub fn ago(ts: f64) -> String {
     }
 }
 
-fn hhmm(ts: f64) -> String {
+pub fn hhmm(ts: f64) -> String {
     use chrono::{Local, TimeZone};
     Local.timestamp_opt(ts as i64, 0).single().map(|t| t.format("%H:%M").to_string()).unwrap_or_default()
 }

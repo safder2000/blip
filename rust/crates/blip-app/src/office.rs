@@ -72,7 +72,7 @@ fn profile(app: &App) -> Map<String, Value> {
         "palette": app.pet.palette(),
         "species": app.pet.species(),
         "voice": crate::voice::available(),
-        "opus": crate::voice::available(),
+        "opus": crate::voice::opus_ok(),
         "ver": crate::windows::VERSION,
     });
     m.as_object().cloned().unwrap_or_default()
@@ -418,6 +418,7 @@ fn on_message(app: &mut App, el: &ActiveEventLoop, d: Map<String, Value>) {
     let empty = Map::new();
     let body = d.get("body").and_then(Value::as_object).unwrap_or(&empty).clone();
     let name = name_of(app, &src);
+    crate::log(&format!("net {kind} from {src}"));
     let cid: String = body.get("call_id").map(|v| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string())).unwrap_or_default().chars().take(40).collect();
     match kind.as_str() {
         "call" => incoming_call(app, el, &src, &name, &cid),
@@ -493,6 +494,10 @@ fn incoming_msg(app: &mut App, el: &ActiveEventLoop, src: &str, name: &str, text
         app.body.jump();
     }
     card(app, el, "", "Message", &format!("{name}: {text}"), vec![("Reply", format!("compose:{src}")), ("OK", String::new())], None, "", "mail", "msg");
+}
+
+pub fn in_call(app: &App) -> bool {
+    !app.office.calls_in.is_empty() || !app.office.calls_out.is_empty()
 }
 
 /// Send something over the network (used by voice.rs).

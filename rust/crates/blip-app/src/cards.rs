@@ -107,6 +107,7 @@ impl CardStack {
             if c.dirty || x != c.win.x || cy != c.win.y {
                 if c.dirty {
                     c.card.draw(&mut c.canvas, theme, fonts);
+                    crate::shot::canvas(&format!("card-{}", c.key.replace(':', "-")), &c.canvas);
                     c.dirty = false;
                 }
                 c.win.present(&c.canvas, x, cy);
@@ -156,6 +157,12 @@ impl CardStack {
                         if let Some(cmd) = cmd {
                             out.push(CardOut::Run(cmd.replace("{why}", "x")));
                         }
+                    }
+                    Some(CardHit::Button(b)) if c.card.buttons[b].1.starts_with("stay:") => {
+                        // a button that keeps the card open (e.g. Mute during a call)
+                        let cmd = c.card.buttons[b].1["stay:".len()..].to_string();
+                        c.dirty = true;
+                        out.push(CardOut::Run(cmd));
                     }
                     Some(CardHit::Button(b)) => {
                         let cmd = c.card.buttons[b].1.clone();
