@@ -64,8 +64,45 @@ fn a_fast_throw_becomes_a_ball_that_ricochets_rolls_and_unfolds() {
     assert!(hit_edge, "ricocheted off a screen edge");
     assert!(b.bounces >= 2);
     assert_eq!(b.action, Action::Unfold);
-    b.anim(now + 1.0);
+    b.anim(now + 2.0);
     assert_eq!(b.action, Action::Idle);
+}
+
+#[test]
+fn landings_vary_and_never_repeat_twice_in_a_row() {
+    let geo = Geo::new(1.0);
+    let mut seen = std::collections::HashSet::new();
+    for seed in 1..40u64 {
+        let (mut b, mut now) =
+            thrown(&geo, 300.0, &[(0.0, 600.0, 500.0), (0.03, 700.0, 450.0), (0.06, 820.0, 390.0)], seed);
+        for _ in 0..8000 {
+            b.step(&geo, &WORK, now);
+            now += STEP;
+            if b.action == blip_pet::body::Action::Unfold {
+                break;
+            }
+        }
+        assert_eq!(b.action, Action::Unfold);
+        seen.insert(format!("{:?}", b.landing));
+        // a second landing on the same body is never the same reaction
+        let first = b.landing;
+        let (mut c, mut t2) = (b, now);
+        c.anim(t2 + 3.0);
+        t2 += 3.0;
+        c.y -= 200.0;
+        c.fling(30.0, -5.0, &geo, t2);
+        for _ in 0..8000 {
+            c.step(&geo, &WORK, t2);
+            t2 += STEP;
+            if c.action == Action::Unfold {
+                break;
+            }
+        }
+        if c.action == Action::Unfold {
+            assert_ne!(first, c.landing);
+        }
+    }
+    assert!(seen.len() >= 5, "only saw {seen:?}");
 }
 
 #[test]

@@ -62,6 +62,28 @@ pub enum Action {
     Gone,
 }
 
+/// How it reacts after a throw lands. Picked at random (never the same twice in a row), so
+/// throwing it around doesn't show the same little scene every time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Landing {
+    /// pops up happy with its species' burst (hearts, sparks, notes)
+    Proud,
+    /// sees stars after a lot of bouncing
+    Dizzy,
+    /// shakes itself off, a puff of dust
+    Shake,
+    /// one more happy little hop
+    Hop,
+    /// lies flat for a moment, then gets up
+    Flop,
+    /// looks left, then right: where am I?
+    Look,
+    /// just gets up
+    Quiet,
+    /// a happy wiggle, turning side to side
+    Wiggle,
+}
+
 /// What a press turned into, for the app to act on.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Gesture {
@@ -102,6 +124,11 @@ pub struct Body {
     pub ring_target: Option<f64>,
     /// sideways shake while ringing, for drawing
     pub jitter: f64,
+    /// how it reacts to this landing, and which one it did last time
+    pub landing: Landing,
+    last_landing: Landing,
+    /// which way it faces during the landing reaction
+    unfold_face: i32,
     phase: f64,
     trail: Vec<(f64, f64, f64)>,
     press: Option<Press>,
@@ -148,6 +175,9 @@ impl Body {
             blink: false,
             ring_target: None,
             jitter: 0.0,
+            landing: Landing::Proud,
+            last_landing: Landing::Proud,
+            unfold_face: 0,
             phase: 0.0,
             trail: Vec::new(),
             press: None,
@@ -231,6 +261,9 @@ impl Body {
                 match self.action {
                     Action::Walk => self.x += self.dir as f64 * if self.slow { 0.7 } else { 1.5 } * s,
                     Action::Play if now < self.action_until => self.jump(),
+                    Action::Unfold if self.landing == Landing::Shake => {
+                        self.jitter = if ((now * 22.0) as i64) % 2 == 0 { 1.5 } else { -1.5 } * s;
+                    }
                     Action::Ring => {
                         if let Some(t) = self.ring_target.filter(|t| (t - self.x).abs() > 4.0) {
                             let step = 9.0 * s;
@@ -365,7 +398,63 @@ impl Body {
             self.ball = false;
             self.airborne = false;
             self.land = 3;
-            self.set(Action::Unfold, 0.6, now);
+            self.start_landing(geo, now);
+        }
+    }
+
+    /// Choose how it reacts to this landing and start it.
+    fn start_landing(&mut self, geo: &Geo, now: f64) {
+        use Landing::*;
+        let dizzy_odds = if self.bounces >= 5 { 0.35 } else { 0.0 };
+        let pick = if self.last_landing != Dizzy && self.random() < dizzy_odds {
+            Dizzy
+        } else {
+            let pool: [(Landing, f64); 8] = [(Proud, 3.0), (Shake, 2.0), (Hop, 2.0), (Flop, 1.5), (Look, 2.0), (Quiet, 2.0), (Wiggle, 2.0), (Dizzy, 0.7)];
+            let total: f64 = pool.iter().filter(|(l, _)| *l != self.last_landing).map(|(_, w)| w).sum();
+            let mut roll = self.random() * total;
+            let mut pick = Quiet;
+            for (l, w) in pool {
+                if l == self.last_landing {
+                    continue;
+                }
+                if roll < w {
+                    pick = l;
+                    break;
+                }
+                roll -= w;
+            }
+            pick
+        };
+        self.landing = pick;
+        self.last_landing = pick;
+        self.unfold_face = 0;
+        let secs = match pick {
+            Proud => 0.6,
+            Dizzy => 1.75,
+            Shake => 0.75,
+            Hop => 1.0,
+            Flop => 1.5,
+            Look => 1.5,
+            Quiet => 0.25,
+            Wiggle => 1.25,
+        };
+        if pick == Hop {
+            self.vy = -6.0 * geo.s;
+            self.airborne = true;
+        }
+        self.set(Action::Unfold, secs, now);
+    }
+
+    /// The face during the landing reaction.
+    fn landing_mood(&self, now: f64) -> &'static str {
+        let left = self.action_until - now;
+        match self.landing {
+            Landing::Proud | Landing::Hop | Landing::Wiggle => "happy",
+            Landing::Dizzy => "sick",
+            Landing::Shake => "held",
+            Landing::Flop if left > 0.5 => "sleep",
+            Landing::Look if left > 0.3 => "alert",
+            _ => "normal",
         }
     }
 
@@ -376,8 +465,20 @@ impl Body {
         self.blink = self.random() < 0.08;
         match self.action {
             Action::Unfold if now >= self.action_until => {
+                self.unfold_face = 0;
                 self.set(Action::Idle, 1.5, now);
-                self.happy_until = now + 2.0;
+                if matches!(self.landing, Landing::Proud | Landing::Hop | Landing::Wiggle) {
+                    self.happy_until = now + 2.0;
+                }
+            }
+            Action::Unfold => {
+                let left = self.action_until - now;
+                match self.landing {
+                    Landing::Flop if left > 0.5 => self.land = 2,
+                    Landing::Look => self.unfold_face = if left > 0.9 { -1 } else if left > 0.3 { 1 } else { 0 },
+                    Landing::Wiggle => self.unfold_face = if self.frame % 2 == 0 { -1 } else { 1 },
+                    _ => {}
+                }
             }
             Action::Idle | Action::Walk if now >= self.action_until => self.choose(now),
             Action::Play if now >= self.action_until && !self.airborne => self.set(Action::Idle, 2.0, now),
@@ -484,7 +585,7 @@ impl Body {
     pub fn mood(&self, now: f64) -> &'static str {
         match self.action {
             Action::Held => "held",
-            Action::Unfold => "happy",
+            Action::Unfold => self.landing_mood(now),
             Action::Fall if self.airborne => {
                 if self.chute > 0 {
                     "happy"
@@ -498,7 +599,9 @@ impl Body {
     }
 
     pub fn facing(&self) -> i32 {
-        if self.action == Action::Walk {
+        if self.action == Action::Unfold {
+            self.unfold_face
+        } else if self.action == Action::Walk {
             self.dir
         } else {
             0
@@ -531,7 +634,9 @@ impl Body {
         if let Some(progress) = egg {
             return sprites::build_egg(self.frame, progress);
         }
-        let facing = if matches!(self.action, Action::Walk | Action::Play | Action::Eat) || (self.action == Action::Ring && self.ring_target.is_some()) { self.dir } else { 0 };
+        let facing = if self.action == Action::Unfold {
+            self.unfold_face
+        } else if matches!(self.action, Action::Walk | Action::Play | Action::Eat) || (self.action == Action::Ring && self.ring_target.is_some()) { self.dir } else { 0 };
         let squash = self.land > 0
             || match self.action {
                 Action::Walk | Action::Ring => self.frame % 2 == 0,

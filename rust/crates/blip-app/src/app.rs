@@ -10,7 +10,7 @@ use blip_core::notes::{self, Notes};
 use blip_core::pet::{BodyCmd, Ev, Pet, EGG_TIME};
 use blip_core::timers::{self, Timers};
 use blip_core::{clock, store};
-use blip_pet::body::{Action, Body, Geo, Gesture, Look, Rect, ANIM, STEP};
+use blip_pet::body::{Action, Body, Geo, Gesture, Landing, Look, Rect, ANIM, STEP};
 use blip_pet::sprites::Stage;
 use blip_ui::menu::{CareButton, Item, Menu, PetCard, Tool};
 use blip_ui::scene::{self, Frame, Particle};
@@ -454,9 +454,16 @@ impl App {
         let before = self.body.action;
         self.body.step(&self.geo, &self.work, t);
         if before != Action::Unfold && self.body.action == Action::Unfold {
-            crate::log(&format!("unfold burst for {}", self.pet.species()));
-            // each species pops out of its ball its own way
-            let burst: &[(&'static str, u32)] = match self.pet.species() {
+            crate::log(&format!("landing {:?} for {}", self.body.landing, self.pet.species()));
+            // the proud one pops out of its ball its species' way; the others have their own bits
+            let own: Option<&[(&'static str, u32)]> = match self.body.landing {
+                Landing::Proud => None,
+                Landing::Dizzy => Some(&[("star", 3)]),
+                Landing::Shake | Landing::Flop => Some(&[("dust", 2)]),
+                Landing::Wiggle => Some(&[("note", 1)]),
+                _ => Some(&[]),
+            };
+            let burst: &[(&'static str, u32)] = if let Some(b) = own { b } else { match self.pet.species() {
                 "kitty" => &[("heart", 2)],
                 "bunny" => &[("spark", 4)],
                 "bear" => &[("heart", 1), ("spark", 2)],
@@ -464,7 +471,7 @@ impl App {
                 "chick" => &[("note", 3)],
                 "bot" => &[("spark", 6)],
                 _ => &[("spark", 3)],
-            };
+            } };
             for (k, n) in burst {
                 self.spawn(k, *n);
             }
@@ -485,12 +492,22 @@ impl App {
                 self.pet.finished_eating(food);
             }
             Action::Unfold if self.body.action == Action::Idle && self.pet.hatched() => {
-                if self.body.bounces >= 3 {
-                    self.chirp("dizzy", None, 2.5);
-                } else {
-                    self.chirp("wow", None, 2.0);
+                // say something only some of the time, and fitting the reaction
+                let r = self.pet.rng.f();
+                let say: Option<&'static str> = match self.body.landing {
+                    Landing::Dizzy => Some("dizzy"),
+                    Landing::Proud if r < 0.6 => Some("wow"),
+                    Landing::Hop if r < 0.4 => Some("happy"),
+                    Landing::Wiggle if r < 0.5 => Some("music"),
+                    Landing::Look if r < 0.5 => Some("ask"),
+                    Landing::Shake | Landing::Flop if r < 0.35 => Some("oops"),
+                    _ => None,
+                };
+                if let Some(m) = say {
+                    self.chirp(m, None, 2.0);
                 }
             }
+            Action::Unfold if self.body.landing == Landing::Dizzy && self.body.frame % 2 == 0 => self.spawn("star", 1),
             _ => {}
         }
         if self.pet.asleep() && !self.pet.gone() && self.body.frame % 5 == 0 {
@@ -645,7 +662,7 @@ impl App {
         }
         match self.body.action {
             Action::Held => return "held",
-            Action::Unfold => return "happy",
+            Action::Unfold => return self.body.mood(now),
             Action::Fall if self.body.airborne => return if self.body.chute > 0 { "happy" } else { "held" },
             Action::Ring => return "alert",
             _ => {}
