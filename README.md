@@ -7,8 +7,14 @@ and Basecamp reminders. Windows and Mac.
 
 ## Install
 
-**Windows:** download `BlipSetup-x.y.z.exe` from the [latest release](https://github.com/safder2000/blip/releases/latest)
-and run it. If Windows says "protected your PC", click More info → Run anyway.
+**Windows:** paste this in PowerShell:
+
+```
+irm https://raw.githubusercontent.com/safder2000/blip/main/install-win.ps1 | iex
+```
+
+Or download `BlipSetup-x.y.z.exe` from the [latest release](https://github.com/safder2000/blip/releases/latest) and run it
+(if Windows says "protected your PC", click More info → Run anyway).
 
 **Mac (Apple Silicon):** paste this in Terminal:
 

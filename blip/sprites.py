@@ -379,6 +379,7 @@ _EXTRA = {
     "speaker": "02 06 1E 1E 1E 06 02", "mic": "0E 0E 0E 0E 11 0E 04", "micoff": "1E 0F 0E 06 13 0E 05",
     "hangup": "00 0E 1F 1B 11 00 00",
     "note": "1F 11 17 11 17 11 1F",
+    "list": "00 17 00 17 00 17 00",
 }
 for _i, (_n, _v) in enumerate(_EXTRA.items()):
     _F[chr(0xE000 + _i)] = _v

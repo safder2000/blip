@@ -17,6 +17,13 @@ NET_BLUE = "#4ba3ff"
 _measure = {}
 
 
+def _mix(a, b, t):
+    """Blend colour a into b by t (0..1)."""
+    ca = [int(a[i:i + 2], 16) for i in (1, 3, 5)]
+    cb = [int(b[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#" + "".join(f"{round(x * t + y * (1 - t)):02x}" for x, y in zip(ca, cb))
+
+
 def tkfont_measure(text, f=None):
     import tkinter.font as tkfont
     f = f or kit.F["small"]
@@ -70,9 +77,13 @@ class PopMenu:
             if it.get("sep"):
                 self.rows.append((yy, yy + round(9 * S), it))
                 yy += round(9 * S)
+            elif it.get("gap"):
+                self.rows.append((yy, yy + round(4 * S), it))
+                yy += round(4 * S)
             elif it.get("section"):
-                self.rows.append((yy, yy + round(24 * S), it))
-                yy += round(24 * S)
+                h = round(30 * S) if it.get("badge") else round(24 * S)
+                self.rows.append((yy, yy + h, it))
+                yy += h
             elif it.get("person"):
                 self.rows.append((yy, yy + round(34 * S), it))
                 yy += round(34 * S)
@@ -165,10 +176,23 @@ class PopMenu:
         if self.actions:
             cv.create_rectangle(p + pad, self.sep_after_actions, W - p - pad, self.sep_after_actions + 1,
                                 fill=kit.LINE, width=0, tags="fg")
+        # people (and their extra rows) sit together on a soft panel so the office stands out
+        run = []
+        for y0, y1, it in self.rows + [(0, 0, {})]:
+            if it.get("person") or it.get("panel"):
+                run.append((y0, y1))
+            elif run:
+                pixel_box(cv, p + round(6 * S), run[0][0], W - p - round(6 * S), run[-1][1], p, kit.TILE, "fg")
+                run = []
         for y0, y1, it in self.rows:
+            if it.get("gap"):
+                continue
             if it.get("sep"):
                 ym = (y0 + y1) // 2
                 cv.create_rectangle(p + pad, ym, W - p - pad, ym + 1, fill=kit.LINE, width=0, tags="fg")
+                continue
+            if it.get("section") and it.get("badge"):
+                self.draw_section(y0, y1, it)
                 continue
             if it.get("section"):
                 draw_text(cv, p + pad + round(2 * S), y1 - round(9 * S) - 5 * self.ip // 2 - 2,
@@ -183,7 +207,9 @@ class PopMenu:
             en = it.get("enabled", True)
             hov = en and self.hl == ("row", id(it))
             if hov or (self.child and self.child.owner is it):
-                pixel_box(cv, p + round(4 * S), y0 + 1, W - p - round(4 * S), y1 - 1, p, kit.HOVER, "fg")
+                inset = round(8 * S) if it.get("panel") else round(4 * S)
+                pixel_box(cv, p + inset, y0 + 1, W - p - inset, y1 - 1, p,
+                          kit.ACCENT_SOFT if it.get("panel") else kit.HOVER, "fg")
             fg = kit.INK if en else kit.OFF
             ix = p + pad + round(2 * S)
             if it.get("icon"):
@@ -218,6 +244,42 @@ class PopMenu:
             x1 = rx - i * (bw + gap)
             out.append((x1 - bw, y0 + round(4 * S), x1, y1 - round(4 * S), len(it["buttons"]) - 1 - i))
         return out
+
+    def link_rect(self, y0, y1, it):
+        S, p = self.S, self.p
+        x1 = self.W - p - round(12 * S)
+        return x1 - round(44 * S), y0 + round(4 * S), x1, y1 - round(2 * S)
+
+    def draw_section(self, y0, y1, it):
+        """Section title with a live badge ('● 3 nearby') and a link on the right."""
+        cv, S, p = self.cv, self.S, self.p
+        pad = round(10 * S)
+        ip = max(1, round(1 * S))
+        ty = (y0 + y1) / 2 - 3.5 * ip + round(2 * S)
+        tw = draw_text(cv, p + pad + round(2 * S), ty, it["section"].upper(), ip, kit.MUTED, "fg")
+        live = it.get("live")
+        col = kit.OK if live else kit.MUTED
+        bx = p + pad + round(2 * S) + tw + round(10 * S)
+        cy = (y0 + y1) / 2 + round(2 * S)
+        d = round(7 * S)
+        if live:                                       # soft halo around a green dot
+            cv.create_oval(bx - round(2 * S), cy - d / 2 - round(2 * S), bx + d + round(2 * S),
+                           cy + d / 2 + round(2 * S), fill=_mix(col, kit.SURFACE, 0.3), width=0, tags="fg")
+        cv.create_oval(bx, cy - d / 2, bx + d, cy + d / 2, fill=col, width=0, tags="fg")
+        cv.create_text(bx + d + round(6 * S), cy, text=it["badge"], font=kit.F["bold"] if live else kit.F["small"],
+                       fill=col if live else kit.MUTED, anchor="w", tags="fg")
+        if it.get("link"):
+            x0, ly0, x1, ly1 = self.link_rect(y0, y1, it)
+            hov = self.hl == ("link", id(it))
+            if hov:
+                pixel_box(cv, x0, ly0, x1, ly1, p, kit.HOVER, "fg")
+            lab = it["link"][0]
+            gw = text_width(ICON["chevron"], ip)
+            lw = tkfont_measure(lab)
+            sx = (x0 + x1 - lw - gw - round(4 * S)) / 2
+            cv.create_text(sx, (ly0 + ly1) / 2, text=lab, font=kit.F["small"], fill=kit.ACCENT, anchor="w",
+                           tags="fg")
+            draw_text(cv, sx + lw + round(4 * S), (ly0 + ly1) / 2 - 3.5 * ip, ICON["chevron"], ip, kit.ACCENT, "fg")
 
     def tool_rects(self, y0, y1, it):
         S, p = self.S, self.p
@@ -259,7 +321,7 @@ class PopMenu:
         pad = round(10 * S)
         row_hov = self.hl == ("row", id(it))
         if row_hov or (self.hl and self.hl[:2] == ("btn", id(it))):
-            pixel_box(cv, p + round(4 * S), y0 + 1, W - p - round(4 * S), y1 - 1, p, kit.HOVER, "fg")
+            pixel_box(cv, p + round(8 * S), y0 + 1, W - p - round(8 * S), y1 - 1, p, kit.ACCENT_SOFT, "fg")
         pr = it["person"]
         g = build_pet(pr.get("stage") or "adult", pr.get("palette") if pr.get("palette") in PALETTES else "gold",
                       "happy" if row_hov else "normal", 1, species=pr.get("species") or "blip")
@@ -316,7 +378,12 @@ class PopMenu:
             if x0 <= x <= x1 and y0 <= y <= y1:
                 return ("head", 0), None
         for y0, y1, it in self.rows:
-            if y0 <= y < y1 and not it.get("sep") and not it.get("section"):
+            if y0 <= y < y1 and it.get("section") and it.get("link"):
+                x0, ly0, x1, ly1 = self.link_rect(y0, y1, it)
+                if x0 <= x <= x1:
+                    return ("link", id(it)), it
+                return None, None
+            if y0 <= y < y1 and not it.get("sep") and not it.get("section") and not it.get("gap"):
                 if it.get("tools"):
                     for tx0, ty0, tx1, ty1, i in self.tool_rects(y0, y1, it):
                         if tx0 <= x <= tx1:
@@ -334,7 +401,7 @@ class PopMenu:
         if key != self.hl:
             self.hl = key
             self.hover_since = time.monotonic()
-            self.cv.config(cursor="hand2" if key and key[0] in ("act", "head", "btn", "tool") else "")
+            self.cv.config(cursor="hand2" if key and key[0] in ("act", "head", "btn", "tool", "link") else "")
             self.draw_content()
 
     def on_leave(self, e):
@@ -383,6 +450,8 @@ class PopMenu:
             icon, cmd, en, _tip = obj["buttons"][key[2]]
             if not en:
                 return
+        elif key[0] == "link":
+            cmd = obj["link"][1]
         elif key[0] == "tool":
             tool = obj["tools"][key[2]]
             if tool.get("submenu"):

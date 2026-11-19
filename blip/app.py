@@ -1062,18 +1062,6 @@ class App:
         self.add_alarm(hm[0], hm[1], [])
 
     # ------------------------------------------------ notes & reminders
-    def quick_reminder(self):
-        got = W.ask_reminder(self)
-        if not got:
-            return
-        text, ts = got
-        self.notes.add(text, ts)
-        self.board("Reminder " + describe_when(ts) if ts else "Noted!", 4)
-        self.chirp("happy", "note")
-        w = self.windows.get("notes")
-        if w and w.alive():
-            w.refresh()
-
     def reminder_fired(self, n):
         key = f"note:{n['id']}"
         nid = n["id"]
@@ -1913,47 +1901,57 @@ class App:
 
         peers = sorted(self.net.online() if self.net else [], key=lambda p: (p.get("status") == "busy",
                                                                              (p.get("name") or "").lower()))
-        due = len(self.bc.items)
-        pending = len(self.notes.pending())
-        open_notes = sum(1 for n in self.notes.items if not n.get("done"))
-        items = [
-            {"section": "Notes"},
-            {"label": "Remind me…", "icon": "bell", "command": self.quick_reminder},
-            {"label": "Notes & reminders", "icon": "note", "command": lambda: self.open_window("notes"),
-             "hint": f"{pending} set" if pending else (str(open_notes) if open_notes else "")},
-            {"tools": [{"icon": "hourglass", "label": "Timer", "submenu": timer_menu,
-                        "badge": str(n_active) if n_active else ""},
-                       {"icon": "bell", "label": "Alarm", "command": self.ask_alarm},
-                       {"icon": "stopwatch", "label": "Stopwatch", "command": self.start_stopwatch}]},
-            {"section": f"Office - {len(peers)} nearby" if peers else "Office"},
-        ]
-        SHOW = 5
-        for p in peers[:SHOW]:
-            pid = p["id"]
-            items.append({"person": p, "label": p.get("name", "?"),
-                          "command": (lambda pid=pid: self.compose(pid)),
-                          "buttons": [("phone", (lambda pid=pid: self.call(pid)), True, "Call"),
-                                      ("chat", (lambda pid=pid: self.compose(pid)), True, "Message")]})
-        if not peers:
-            items.append({"label": "Nobody nearby yet · look again", "icon": "reset", "command": self.net_rescan})
-        items += [
-            {"label": "Everyone & inbox" if len(peers) > SHOW else "Buddies & inbox", "icon": "people",
-             "command": lambda: self.open_window("buddies"),
-             "hint": f"+{len(peers) - SHOW}" if len(peers) > SHOW else ""},
-            {"label": "Basecamp tasks", "icon": "task", "command": lambda: self.open_window("tasks"),
-             "hint": str(due or "")} if self.bc.connected else
-            {"label": "Connect Basecamp", "icon": "task", "command": self.connect_basecamp},
-            {"label": "Do not disturb", "icon": "dnd", "check": bool(self.cfg["dnd"]),
-             "command": lambda: self.set_dnd(not self.cfg["dnd"])},
-            {"sep": True},
-            {"label": "Wander around", "icon": "walk", "check": bool(st["wander"]),
-             "command": lambda: self.set_wander(not self.st["wander"])},
-            {"label": "Settings", "icon": "gear", "command": lambda: self.open_window("settings")},
-        ]
+        on = self.cfg.menu_on
+        items = []
+        if on("notes"):
+            pending = len(self.notes.pending())
+            open_notes = sum(1 for n in self.notes.items if not n.get("done"))
+            items.append({"label": "Notes", "icon": "note", "command": lambda: self.open_window("notes"),
+                          "hint": (f"{pending} reminder{'s' if pending != 1 else ''}" if pending
+                                   else (str(open_notes) if open_notes else ""))})
+        if on("focus"):
+            items.append({"tools": [{"icon": "hourglass", "label": "Timer", "submenu": timer_menu,
+                                     "badge": str(n_active) if n_active else ""},
+                                    {"icon": "bell", "label": "Alarm", "command": self.ask_alarm},
+                                    {"icon": "stopwatch", "label": "Stopwatch", "command": self.start_stopwatch}]})
+        if on("office"):
+            SHOW = 5
+            items.append({"sep": True} if items else {"gap": True})
+            items.append({"section": "Office", "live": bool(peers),
+                          "badge": f"{len(peers)} nearby" if peers else "nobody nearby",
+                          "link": ("All", lambda: self.open_window("buddies"))})
+            for p in peers[:SHOW]:
+                pid = p["id"]
+                items.append({"person": p, "label": p.get("name", "?"),
+                              "command": (lambda pid=pid: self.compose(pid)),
+                              "buttons": [("phone", (lambda pid=pid: self.call(pid)), True, "Call"),
+                                          ("chat", (lambda pid=pid: self.compose(pid)), True, "Message")]})
+            if len(peers) > SHOW:
+                items.append({"label": f"{len(peers) - SHOW} more\u2026", "icon": "people", "panel": True,
+                              "command": lambda: self.open_window("buddies")})
+            if not peers:
+                items.append({"label": "Look again", "icon": "reset", "panel": True, "command": self.net_rescan})
+        extra = []
+        if on("basecamp") and self.bc.connected:
+            due = len(self.bc.items)
+            extra.append({"label": "Basecamp tasks", "icon": "task", "command": lambda: self.open_window("tasks"),
+                          "hint": str(due or "")})
+        if on("dnd"):
+            extra.append({"label": "Do not disturb", "icon": "dnd", "check": bool(self.cfg["dnd"]),
+                          "command": lambda: self.set_dnd(not self.cfg["dnd"])})
+        if on("wander"):
+            extra.append({"label": "Wander around", "icon": "walk", "check": bool(st["wander"]),
+                          "command": lambda: self.set_wander(not self.st["wander"])})
+        if extra:
+            items += ([{"sep": True}] if items else []) + extra
+        if items:
+            items.append({"sep": True})
+        items.append({"label": "Settings", "icon": "gear", "command": lambda: self.open_window("settings")})
         if st["gone"]:
             items.append({"label": "Hatch a new egg", "icon": "heart", "command": self.new_egg})
         items.append({"label": "Quit Blip", "icon": "power", "command": self.quit})
-        self.menu = PopMenu(self, items, e.x_root + 4, e.y_root - 20, header=header, actions=actions)
+        self.menu = PopMenu(self, items, e.x_root + 4, e.y_root - 20, header=header,
+                            actions=actions if self.cfg.menu_on("care") else None)
 
     def set_wander(self, on):
         self.st["wander"] = bool(on)

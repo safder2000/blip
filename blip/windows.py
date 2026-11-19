@@ -98,64 +98,6 @@ def _when_ts(choice, typed):
     return parse_when({"30m": "in 30m", "1h": "in 1h", "tomorrow": "tomorrow 9:00"}[choice]), None
 
 
-def ask_reminder(app, parent=None):
-    """'Remind me...' dialog: what + when. Returns (text, timestamp_or_None) or None."""
-    top = tk.Toplevel(parent or app.root, bg=kit.BG)
-    top.withdraw()                          # place first, then show (see kit.Window)
-    top.title("Remind me")
-    top.resizable(False, False)
-    top.transient(parent or app.root)
-    f = tk.Frame(top, bg=kit.BG)
-    f.pack(padx=S_(top, 22), pady=S_(top, 18))
-    label(f, "Remind me to…", "bold").pack(anchor="w")
-    what = Field(f, "", width=40, placeholder="call the client back")
-    what.pack(fill="x", pady=(S_(top, 8), S_(top, 14)))
-    label(f, "When?", "bold").pack(anchor="w")
-    whenf = tk.Frame(f, bg=kit.BG)
-    picked = Field(whenf, "", width=24, placeholder="in 20m · 5pm · 17:30 · tomorrow 10")
-    chips = Chips(f, WHEN[1:], "30m", command=lambda v: (picked.pack(anchor="w", pady=(S_(top, 8), 0))
-                                                          if v == "pick" else picked.pack_forget(),
-                                                          v == "pick" and picked.entry.focus_set()))
-    chips.pack(anchor="w", pady=(S_(top, 8), 0))
-    whenf.pack(fill="x")
-    err = tk.Label(f, text="", font=kit.F["small"], fg=kit.DANGER, bg=kit.BG)
-    err.pack(anchor="w", pady=(S_(top, 6), 0))
-    res = {"v": None}
-
-    def ok():
-        text = what.get().strip()
-        if not text:
-            err.config(text="What should Blip remind you about?")
-            what.entry.focus_set()
-            return
-        ts, e = _when_ts(chips.get(), picked.get())
-        if e:
-            err.config(text=e)
-            return
-        res["v"] = (text, ts)
-        top.destroy()
-    bar = tk.Frame(f, bg=kit.BG)
-    bar.pack(fill="x", pady=(S_(top, 6), 0))
-    Btn(bar, "Remind me", ok, kind="primary", icon="bell").pack(side="right")
-    Btn(bar, "Cancel", top.destroy).pack(side="right", padx=S_(top, 8))
-    what.entry.bind("<Return>", lambda e: ok())
-    picked.entry.bind("<Return>", lambda e: ok())
-    top.bind("<Escape>", lambda e: top.destroy())
-    top.update_idletasks()
-    l, t, r, b = app.work
-    w, h = top.winfo_reqwidth(), top.winfo_reqheight() + S_(top, 40)
-    x = int(min(max(app.x + app.W / 2 - w / 2, l + 10), r - w - 10))
-    y = int(max(t + 10, app.y - h - 10))
-    top.geometry(f"+{x}+{y}")
-    top.deiconify()
-    kit.tint_titlebar(top)
-    top.attributes("-topmost", True)
-    what.entry.focus_force()
-    top.grab_set()
-    top.wait_window()
-    return res["v"]
-
-
 def section(parent, text, pady=(14, 6)):
     f = tk.Frame(parent, bg=kit.bg_of(parent))
     f.pack(fill="x", pady=(S_(parent, pady[0]), S_(parent, pady[1])))
@@ -220,8 +162,8 @@ class NavItem(tk.Canvas):
 class SettingsWindow(kit.Window):
     title = "Settings"
     icon = "gear"
-    PAGES = [("pet", "paw", "Pet"), ("general", "gear", "General"), ("office", "people", "Office"),
-             ("basecamp", "check", "Basecamp")]
+    PAGES = [("pet", "paw", "Pet"), ("general", "gear", "General"), ("menu", "list", "Menu"),
+             ("office", "people", "Office"), ("basecamp", "check", "Basecamp")]
 
     def build(self, f):
         S = self.S
@@ -462,6 +404,27 @@ class SettingsWindow(kit.Window):
         pixel_box(d, 0, 0, n, n, 1, col)
         busy = kind in ("checking", "installing")
         self.upd_btn.set_enabled(not busy)
+
+    MENU_ITEMS = [("care", "Care buttons", "Feed, snack, play, clean, medicine and sleep."),
+                  ("notes", "Notes", "Your notes and reminders."),
+                  ("focus", "Timer, alarm & stopwatch", "One row of small buttons."),
+                  ("office", "People nearby", "Call and message colleagues' pets."),
+                  ("basecamp", "Basecamp tasks", "Only shows while Basecamp is connected."),
+                  ("dnd", "Do not disturb", "Quick switch for calls."),
+                  ("wander", "Wander around", "Quick switch for walking around.")]
+
+    def page_menu(self, f):
+        cfg = self.app.cfg
+        muted(f, "Choose what shows when you right-click your pet. Settings is always there; everything you "
+                 "hide stays available here in Settings.", wraplength=round(440 * self.S)).pack(
+            anchor="w", pady=(0, round(10 * self.S)))
+        card = Card(f)
+        card.pack(fill="x")
+        b = card.body
+        for i, (key, title, desc) in enumerate(self.MENU_ITEMS):
+            if i:
+                kit.hline(b)
+            self._toggle_row(b, title, desc, cfg.menu_on(key), lambda v, k=key: cfg.set_menu(k, v))
 
     def _toggle_row(self, parent, title, desc, value, command):
         r = SettingRow(parent, title, desc)

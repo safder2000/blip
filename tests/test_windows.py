@@ -28,7 +28,7 @@ class WindowTests(unittest.TestCase):
             w = a.open_window(name)
             a.root.update()
             if name == "settings":
-                for page in ("pet", "general", "office", "basecamp"):
+                for page in ("pet", "general", "menu", "office", "basecamp"):
                     w.show(page)
                     w.refresh()
                     a.root.update()
@@ -65,8 +65,53 @@ class WindowTests(unittest.TestCase):
         self.assertIsNotNone(a.menu)
         labels = [r[2].get("label") for r in a.menu.rows]
         self.assertNotIn("Timers & alarms", labels)      # lives inside the Timer flyout now
-        self.assertIn("Notes & reminders", labels)
+        self.assertIn("Notes", labels)
+        self.assertNotIn("Remind me…", labels)
+        self.assertNotIn("Wander around", labels)              # off by default: less clutter
         a.menu.close()
+
+    def test_menu_sections_can_be_hidden(self):
+        a = self.app
+
+        class E:
+            x_root, y_root = 400, 300
+        try:
+            for key in ("care", "notes", "focus", "office", "basecamp", "dnd"):
+                a.cfg.set_menu(key, False)
+            a.on_menu(E())
+            a.root.update()
+            m = a.menu
+            self.assertEqual(m.actions, [])
+            self.assertEqual([r[2].get("label") for r in m.rows if r[2].get("label")], ["Settings", "Quit Blip"])
+            m.close()
+            a.cfg.set_menu("wander", True)
+            a.on_menu(E())
+            a.root.update()
+            self.assertIn("Wander around", [r[2].get("label") for r in a.menu.rows])
+            a.menu.close()
+        finally:
+            a.cfg["menu"] = {}
+
+    def test_office_link_opens_buddies(self):
+        a = self.app
+
+        class E:
+            x_root, y_root = 400, 300
+        a.on_menu(E())
+        a.root.update()
+        m = a.menu
+        y0, y1, it = next(r for r in m.rows if r[2].get("section") == "Office")
+        x0, ly0, x1, ly1 = m.link_rect(y0, y1, it)
+
+        class C:
+            x, y = (x0 + x1) / 2, (ly0 + ly1) / 2
+        self.assertEqual(m.hit(C.x, C.y)[0][0], "link")
+        m.on_click(C())
+        for _ in range(5):
+            a.root.update()
+            time.sleep(0.01)
+        self.assertTrue(a.windows["buddies"].alive())
+        a.windows["buddies"].close()
 
     def test_menu_tools_row(self):
         a = self.app

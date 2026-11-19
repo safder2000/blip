@@ -57,6 +57,7 @@ DEFAULTS = {
     "sound": False,                # quiet by default; Settings > General > Sounds
     "volume": 60,
     "auto_update": True,
+    "menu": {},                    # which right-click menu sections show (see MENU_DEFAULTS)
     "theme": "system",             # dark | light | system (follows Windows / macOS)
     "last_update_check": 0,
     "bc_token": "",
@@ -71,7 +72,21 @@ DEFAULTS = {
 }
 
 
+MENU_DEFAULTS = {"care": True, "notes": True, "focus": True, "office": True, "basecamp": True,
+                 "dnd": True, "wander": False}
+
+
 class Config(dict):
+    def menu_on(self, key):
+        m = self.get("menu") if isinstance(self.get("menu"), dict) else {}
+        return bool(m.get(key, MENU_DEFAULTS.get(key, True)))
+
+    def set_menu(self, key, on):
+        m = dict(self.get("menu") or {})
+        m[key] = bool(on)
+        self["menu"] = m
+        self.save()
+
     def __init__(self, path):
         super().__init__(DEFAULTS)
         self.path = Path(path)
