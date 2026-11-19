@@ -14,7 +14,7 @@ use windows_sys::Win32::Graphics::Gdi::{
 use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetCursorPos, GetWindowLongPtrW, SetWindowLongPtrW, ShowWindow, UpdateLayeredWindow, GWL_EXSTYLE, SW_SHOWNOACTIVATE,
+    GetCursorPos, GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, ShowWindow, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, UpdateLayeredWindow, GWL_EXSTYLE, SW_SHOWNOACTIVATE,
     ULW_ALPHA, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
@@ -23,6 +23,10 @@ pub struct Surface {
     pub failures: u64,
     /// never take focus (the pet, poops, cards): clicking them leaves your app active
     pub no_activate: bool,
+    /// what was last handed to Windows: (x, y, w, h, hash of the pixels)
+    last: Option<(i32, i32, i32, i32, u64)>,
+    /// where the window is (moved with SetWindowPos, not UpdateLayeredWindow)
+    at: Option<(i32, i32)>,
 }
 
 impl Surface {
@@ -32,7 +36,7 @@ impl Surface {
             RawWindowHandle::Win32(h) => h.hwnd.get() as HWND,
             _ => unreachable!("not a Win32 window"),
         };
-        let s = Surface { hwnd, failures: 0, no_activate: false };
+        let s = Surface { hwnd, failures: 0, no_activate: false, last: None, at: None };
         s.ensure_layered();
         s
     }
@@ -56,6 +60,29 @@ impl Surface {
     /// Show `pixels` (premultiplied 0xAARRGGBB, w x h) with the window's top-left at (x, y).
     pub fn present(&mut self, pixels: &[u32], w: i32, h: i32, x: i32, y: i32) {
         self.ensure_layered();
+        // Only touch the window when the picture or its place changed. Re-sending the same frame
+        // dozens of times a second makes Windows drop real mouse clicks on the window now and then.
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for &p in pixels {
+            hash = (hash ^ p as u64).wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        if self.last == Some((x, y, w, h, hash)) {
+            return;
+        }
+        let same_picture = self.last.map_or(false, |l| (l.2, l.3, l.4) == (w, h, hash));
+        self.last = Some((x, y, w, h, hash));
+        // Move the window the ordinary way. Moving it through UpdateLayeredWindow (as the pet walks)
+        // leaves Windows routing real mouse clicks past it until something else takes the
+        // foreground - the "pet can't be clicked until I click the taskbar" bug.
+        if self.at != Some((x, y)) {
+            unsafe {
+                SetWindowPos(self.hwnd, null_mut(), x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE);
+            }
+            self.at = Some((x, y));
+        }
+        if same_picture {
+            return;
+        }
         unsafe {
             let screen = GetDC(null_mut());
             let dc = CreateCompatibleDC(screen);
@@ -81,10 +108,10 @@ impl Surface {
                     SourceConstantAlpha: 255,
                     AlphaFormat: AC_SRC_ALPHA as u8,
                 };
-                let dst = POINT { x, y };
+                let _ = (x, y);
                 let size = SIZE { cx: w, cy: h };
                 let src = POINT { x: 0, y: 0 };
-                if UpdateLayeredWindow(self.hwnd, screen, &dst, &size, dc, &src, 0, &blend, ULW_ALPHA) == 0 {
+                if UpdateLayeredWindow(self.hwnd, screen, std::ptr::null(), &size, dc, &src, 0, &blend, ULW_ALPHA) == 0 {
                     self.failures += 1;
                 }
                 SelectObject(dc, old);
