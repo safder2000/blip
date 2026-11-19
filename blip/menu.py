@@ -10,6 +10,21 @@ from .ui import KEY, make_overlay, pixel_box, place
 
 
 
+def peer_sprite(pr, mood="normal"):
+    """A colleague's pet from what their Blip told us. Their data can be anything (an egg, an
+    older or newer version), so never let it break the menu."""
+    from .sprites import SPECIES
+    stage = pr.get("stage")
+    try:
+        if stage == "egg":
+            return build_egg(1, 0.5)
+        return build_pet(stage if stage in ("baby", "child", "adult") else "adult",
+                         pr.get("palette") if pr.get("palette") in PALETTES else "gold", mood, 1,
+                         species=pr.get("species") if pr.get("species") in SPECIES else "blip")
+    except Exception:
+        return build_pet("adult", "gold", mood, 1)
+
+
 CALL_GREEN, CALL_HOVER = "#2fb865", "#28a359"
 MSG_BLUE, MSG_HOVER = "#3d8bfd", "#2f78e6"
 NET_BLUE = "#4ba3ff"
@@ -325,8 +340,7 @@ class PopMenu:
         if row_hov or (self.hl and self.hl[:2] == ("btn", id(it))):
             pixel_box(cv, p + round(8 * S), y0 + 1, W - p - round(8 * S), y1 - 1, p, kit.ACCENT_SOFT, "fg")
         pr = it["person"]
-        g = build_pet(pr.get("stage") or "adult", pr.get("palette") if pr.get("palette") in PALETTES else "gold",
-                      "happy" if row_hov else "normal", 1, species=pr.get("species") or "blip")
+        g = peer_sprite(pr, "happy" if row_hov else "normal")
         xs = [x for x, _ in g]
         ys = [y for _, y in g]
         sp = max(1, round(0.9 * S))

@@ -187,7 +187,9 @@ class WindowTests(unittest.TestCase):
             def online(self):
                 return [{"id": "p1", "name": "Ravi", "species": "kitty", "palette": "sky", "stage": "adult",
                          "via": "server"},
-                        {"id": "p2", "name": "Asha", "status": "busy", "species": "bot"}]
+                        {"id": "p2", "name": "Asha", "status": "busy", "species": "bot"},
+                        {"id": "p3", "name": "Egg", "stage": "egg", "palette": "baby"},          # just hatched
+                        {"id": "p4", "name": "Odd", "stage": "titan", "species": "dragon", "palette": 7}]
         a.net = FakeNet()
         a.call = lambda pid: calls.append(("call", pid))
         a.compose = lambda pid, **k: calls.append(("msg", pid))
@@ -198,7 +200,7 @@ class WindowTests(unittest.TestCase):
             a.root.update()
             m = a.menu
             people = [r for r in m.rows if r[2].get("person")]
-            self.assertEqual([r[2]["label"] for r in people], ["Ravi", "Asha"])     # busy people last
+            self.assertEqual([r[2]["label"] for r in people], ["Egg", "Odd", "Ravi", "Asha"])   # busy last
             y0, y1, it = people[0]
             bx0, by0, bx1, by1, i = next(b for b in m.person_buttons(y0, y1, it) if it["buttons"][b[4]][0] == "phone")
             key, obj = m.hit((bx0 + bx1) / 2, (y0 + y1) / 2)
@@ -210,7 +212,7 @@ class WindowTests(unittest.TestCase):
             for _ in range(5):
                 a.root.update()
                 time.sleep(0.01)
-            self.assertEqual(calls, [("call", "p1")])
+            self.assertEqual(calls, [("call", "p3")])
         finally:
             a.net = None
             if a.menu:
