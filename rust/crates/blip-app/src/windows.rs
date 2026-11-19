@@ -353,6 +353,7 @@ fn ask_texts(app: &App, kind: &str) -> (&'static str, String, String, String, St
             let name = office::peer_name(app, rest).unwrap_or_else(|| "your colleague".into());
             ("Message", format!("Message to {name}"), String::new(), "Type a message\u{2026}".into(), "Send".into())
         }
+        "reply" => ("Reply", "Your reply:".into(), String::new(), "On my way!".into(), "Send".into()),
         _ => ("Blip", String::new(), String::new(), String::new(), "OK".into()),
     }
 }
@@ -1285,7 +1286,19 @@ fn buddies_ui(ui: &mut Ui, t: &Theme, app: &mut App, el: &ActiveEventLoop, s: &m
                         ui.set_max_width(340.0);
                         let who = if mine { format!("You \u{2192} {}", e.name) } else { e.name.clone() };
                         gui::colored(ui, &format!("{who}  {}", hhmm(e.ts)), t.muted, 11.5);
-                        ui.add(egui::Label::new(RichText::new(&e.text).size(14.0)).wrap());
+                        // call notes start with an emoji the UI font lacks: show a pixel icon
+                        let (icon, text) = match e.text.chars().next() {
+                            Some('\u{1F4DE}') => (Some("phone"), e.text.trim_start_matches('\u{1F4DE}').trim_start()),
+                            Some('\u{1F3A7}') => (Some("speaker"), e.text.trim_start_matches('\u{1F3A7}').trim_start()),
+                            _ => (None, e.text.as_str()),
+                        };
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+                            if let Some(i) = icon {
+                                gui::icon(ui, i, gui::px(ui, 1.6), c(t.accent));
+                            }
+                            ui.add(egui::Label::new(RichText::new(text).size(14.0)).wrap());
+                        });
                     });
                 if !mine && !e.peer.is_empty() && gui::button(ui, t, "Reply", None, Kind::Ghost, true, true).clicked() {
                     app.want_window.push(format!("ask:message:{}", e.peer));
@@ -1424,6 +1437,12 @@ fn ask_ui(ui: &mut Ui, t: &Theme, app: &mut App, el: &ActiveEventLoop, s: &mut A
                 return false;
             }
             app.run(el, &format!("msg:{rest}:{text}"));
+        }
+        "reply" => {
+            if text.is_empty() {
+                return false;
+            }
+            app.run(el, &format!("reply:{rest}:{text}"));
         }
         _ => {}
     }

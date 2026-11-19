@@ -5,14 +5,17 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod app;
+mod basecamp;
 mod cards;
 mod gui;
+mod net;
 mod office;
 mod overlay;
 mod platform;
 mod shot;
 mod soft;
 mod sound;
+mod voice;
 mod windows;
 
 use std::time::{Duration, Instant};

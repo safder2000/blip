@@ -15,6 +15,11 @@ blip-ui = { path = "../blip-ui" }
 blip-core = { path = "../blip-core" }
 blip-proto = { path = "../blip-proto" }
 chrono = "0.4"
+base64.workspace = true
+socket2 = "0.5"
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true, features = ["native-tls"] }
+futures-util.workspace = true
 rodio = { version = "0.19", default-features = false }
 egui = "0.37"
 egui-winit = { version = "0.37", default-features = false, features = ["clipboard", "links"] }

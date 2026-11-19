@@ -56,6 +56,7 @@ struct Tray {
 }
 
 pub struct App {
+    pub office: crate::office::Office,
     pub cfg: Config,
     pub pet: Pet,
     pub body: Body,
@@ -97,6 +98,7 @@ pub struct App {
     /// test steps for the newest window (BLIP_DEMO "ui:click:x,y" ...)
     pub ui_script: Vec<String>,
     later: Vec<String>,
+    timed: Vec<(f64, String)>,
     /// something changed that the open windows show: redraw them now
     pub windows_dirty: bool,
     pub startup_on: bool,
@@ -132,6 +134,7 @@ impl App {
         let fonts = Fonts::system().expect("a system font (Segoe UI / SF)");
         let theme = theme::pick(cfg.str("theme"), platform::system_dark());
         let mut app = App {
+            office: crate::office::Office::load(&dir),
             cfg,
             timers: Timers::load(dir.join("timers.json")),
             notes: Notes::load(dir.join("notes.json")),
@@ -171,6 +174,7 @@ impl App {
             want_window: vec![],
             ui_script: vec![],
             later: vec![],
+            timed: vec![],
             windows_dirty: false,
             startup_on: platform::startup_enabled(),
             update_state: None,
@@ -206,6 +210,7 @@ impl App {
         if !self.cfg.bool("named") {
             self.want_window.push("welcome".into());
         }
+        crate::office::start(self);
         if self.cfg.bool("mac_dock") {
             platform::show_in_dock(true);
         }
@@ -371,6 +376,14 @@ impl App {
             self.run(el, &cmd);
         }
         self.tray_events(el);
+        crate::office::tick(self, el);
+        if !self.timed.is_empty() {
+            let due: Vec<String> = self.timed.iter().filter(|(t, _)| *t <= now).map(|(_, c)| c.clone()).collect();
+            self.timed.retain(|(t, _)| *t > now);
+            for c in due {
+                self.run_demo(el, &c);
+            }
+        }
         for cmd in std::mem::take(&mut self.later) {
             self.run(el, &cmd);
         }
@@ -846,6 +859,7 @@ impl App {
         if let Some(m) = self.menu.as_mut() {
             if m.dirty {
                 m.menu.draw(&mut m.canvas, &self.theme, &mut self.fonts);
+                crate::shot::canvas("menu", &m.canvas);
                 let (x, y) = (m.win.x, m.win.y);
                 m.win.present(&m.canvas, x, y);
                 m.dirty = false;
@@ -1097,6 +1111,14 @@ impl App {
             }
             return;
         }
+        if let Some(rest) = what.strip_prefix("at:") {
+            // "at:SECONDS:command" runs the command that many seconds after start
+            if let Some((secs, cmd)) = rest.split_once(':') {
+                let t: f64 = secs.parse().unwrap_or(0.0);
+                self.timed.push((t, cmd.to_string()));
+            }
+            return;
+        }
         if let Some(step) = what.strip_prefix("ui:") {
             self.ui_script.push(step.to_string());
             return;
@@ -1121,6 +1143,7 @@ impl App {
     }
 
     pub fn shutdown(&mut self) {
+        crate::office::shutdown(self);
         self.save();
     }
 

@@ -88,7 +88,7 @@ impl CardStack {
         for c in std::mem::take(&mut self.cards) {
             if c.expires.map_or(false, |e| now >= e) {
                 if let Some(cmd) = &c.close_cmd {
-                    out.push(CardOut::Run(cmd.clone()));
+                    out.push(CardOut::Run(cmd.replace("{why}", "timeout")));
                 }
                 continue; // dropping closes the window
             }
@@ -154,7 +154,7 @@ impl CardStack {
                         let cmd = c.close_cmd.clone();
                         self.cards.remove(i);
                         if let Some(cmd) = cmd {
-                            out.push(CardOut::Run(cmd));
+                            out.push(CardOut::Run(cmd.replace("{why}", "x")));
                         }
                     }
                     Some(CardHit::Button(b)) => {
@@ -164,7 +164,7 @@ impl CardStack {
                         out.push(CardOut::Run(cmd));
                         // a button also ends whatever the card was for (e.g. stops the ringing)
                         if let Some(close) = close {
-                            out.push(CardOut::Run(close));
+                            out.push(CardOut::Run(close.replace("{why}", "button")));
                         }
                     }
                     _ => {}

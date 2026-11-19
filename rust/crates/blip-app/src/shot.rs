@@ -58,3 +58,15 @@ pub fn save_png(path: &Path, w: u32, h: u32, rgba: &[u8]) -> std::io::Result<()>
     chunk(&mut out, b"IEND", &[]);
     std::fs::File::create(path)?.write_all(&out)
 }
+
+/// Save an overlay canvas (premultiplied ARGB) if BLIP_SHOT is set: `<dir>/<name>.png`.
+pub fn canvas(name: &str, cv: &blip_ui::Canvas) {
+    let Some(dir) = std::env::var_os("BLIP_SHOT") else { return };
+    let mut rgba = Vec::with_capacity(cv.px.len() * 4);
+    for &p in &cv.px {
+        let a = (p >> 24) & 255;
+        let un = |c: u32| if a == 0 { 0 } else { ((c * 255 + a / 2) / a).min(255) as u8 };
+        rgba.extend_from_slice(&[un((p >> 16) & 255), un((p >> 8) & 255), un(p & 255), a as u8]);
+    }
+    let _ = save_png(&std::path::Path::new(&dir).join(format!("{name}.png")), cv.w as u32, cv.h as u32, &rgba);
+}
