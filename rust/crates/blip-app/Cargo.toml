@@ -1,0 +1,30 @@
+[package]
+name = "blip-app"
+description = "Blip, the office desktop pet (Rust version)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "blip"
+path = "src/main.rs"
+
+[dependencies]
+blip-pet = { path = "../blip-pet" }
+serde_json.workspace = true
+winit = "0.30"
+raw-window-handle = "0.6"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.5.2"
+objc2-foundation = { version = "0.2.2", features = ["NSGeometry", "NSArray", "NSValue"] }
+objc2-app-kit = { version = "0.2.2", features = ["NSResponder", "NSView", "NSWindow", "NSEvent", "NSScreen", "NSColor", "NSApplication", "NSRunningApplication"] }
+objc2-quartz-core = { version = "0.2.2", features = ["CALayer"] }
+core-graphics = "0.23"
+core-foundation = "0.9"

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/blip-proto", "crates/blip-server"]
+members = ["crates/blip-proto", "crates/blip-server", "crates/blip-pet", "crates/blip-app"]
 
 [workspace.package]
 version = "0.8.0"

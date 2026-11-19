@@ -1,0 +1,12 @@
+[package]
+name = "blip-pet"
+description = "The pet itself: sprites, behaviour and physics. No windows here, so it is easy to test."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+serde_json.workspace = true
+sha2.workspace = true

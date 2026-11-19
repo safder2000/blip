@@ -23,7 +23,8 @@ compatible with the Python wire format: signed envelopes, team encryption, room 
 |---|---|---|
 | `blip-proto` | Wire format, team crypto, link parsing, voice packets | done, matches Python |
 | `blip-server` | Online server, drop-in for `blip/server.py` | done, passes the Python server tests |
-| `blip-app` | The desktop pet | next |
+| `blip-pet` | Sprites (all 8,064 poses match Python pixel for pixel), movement, physics, rendering | done |
+| `blip-app` | The desktop pet: transparent window on the taskbar, walk, drag, throw, click-through | step 2 done on Windows; Mac built by CI, not yet run on a real Mac |
 
 ## Plan
 
@@ -31,8 +32,11 @@ compatible with the Python wire format: signed envelopes, team encryption, room 
    older than v0.7. The Python `tests/test_net.py` and `tests/test_voice.py` pass against it:
    `BLIP_SERVER_BIN=rust/target/release/blip-server python -m unittest tests.test_net tests.test_voice`.
    Then it replaces the Python server on the NAS (app `blip`).
-2. **Pet window**: a transparent, borderless, always-on-top window (`winit` + `softbuffer`), with pixel
-   sprites ported from `blip/sprites.py`, click-through outside the pet, physics, drag and throw.
+2. **Pet window**: done. Windows: a layered window (real per-pixel transparency; Windows sends clicks on
+   see-through pixels to whatever is behind). Mac: transparent window, image on its layer, clicks let
+   through where there's no pet, no Dock icon. Sprites ported from `blip/sprites.py`, physics from
+   `blip/app.py`. Run it: `cargo run --release -p blip-app` (it reads your pet's look from the Python
+   Blip's state.json, read-only).
 3. **Tray / menu bar** (`tray-icon`) and the pixel right-click menu and cards in their own overlay windows.
 4. **Windows**: Settings, Notes, Timers, Buddies (`egui`, charcoal theme, same layout as today).
 5. **Office network**: UDP discovery, TCP messages and the server link (`tokio`), using `blip-proto`.

@@ -46,3 +46,35 @@ path = os.path.join(os.path.dirname(__file__), "..", "crates", "blip-proto", "te
 with open(path, "w", encoding="utf-8") as f:
     json.dump(out, f, ensure_ascii=False, indent=1)
 print("wrote", os.path.normpath(path))
+
+
+# ---------------------------------------------------------------- sprites (for crates/blip-pet)
+import hashlib  # noqa: E402
+import itertools  # noqa: E402
+
+from blip import sprites  # noqa: E402
+
+
+def fp(g):
+    s = "".join(f"{x},{y},{c.lstrip('#').lower()};" for (x, y), c in sorted(g.items()))
+    return hashlib.sha256(s.encode()).hexdigest()[:16]
+
+
+pals = list(sprites.PALETTES)
+pets = []
+combos = itertools.product(list(sprites.SPECIES), ["baby", "child", "adult"],
+                           ["normal", "happy", "sad", "eat", "sleep", "sick", "held", "alert"],
+                           range(4), (-1, 0, 1), (False, True), (False, True))
+for i, (sp, st, mood, fr, facing, squash, blink) in enumerate(combos):
+    pal = pals[i % len(pals)]
+    pets.append([sp, st, pal, mood, fr, facing, squash, blink,
+                 fp(sprites.build_pet(st, pal, mood, fr, facing, squash, blink, sp))])
+eggs = [[fr, pr, fp(sprites.build_egg(fr, pr))] for fr in range(4) for pr in (0.1, 0.5, 0.7, 0.9)]
+balls = []
+for i, (ang, sq, face) in enumerate(itertools.product((0.0, 0.7, 2.5, 4.4, -1.3), (0.0, 0.25), (True, False))):
+    pal = pals[i % len(pals)]
+    balls.append([pal, ang, sq, face, fp(sprites.build_ball(sprites.PALETTES[pal], ang, face, sq))])
+spath = os.path.join(os.path.dirname(__file__), "..", "crates", "blip-pet", "tests", "sprites.json")
+with open(spath, "w", encoding="utf-8") as f:
+    json.dump({"pets": pets, "eggs": eggs, "balls": balls}, f, separators=(",", ":"))
+print("wrote", os.path.normpath(spath), len(pets), "pets")
