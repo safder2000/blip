@@ -339,6 +339,11 @@ class SettingsWindow(kit.Window):
         kit.hline(b)
         self._toggle_row(b, "Open at login" if plat.MAC else "Start with Windows", "Blip appears when you sign in.",
                          app.startup_enabled(), app.set_startup)
+        if plat.MAC:
+            kit.hline(b)
+            self._toggle_row(b, "Show in the Dock", "Off: Blip lives only on your desktop. Right-click the pet, "
+                             "or press and hold it, for the menu.", bool(cfg.get("mac_dock")),
+                             lambda v: (self._cfg(mac_dock=v), plat.mac_show_in_dock(v)))
         kit.hline(b)
         self._toggle_row(b, "Wander around", "Let your pet walk along the bottom of the screen.", app.st["wander"], app.set_wander)
 

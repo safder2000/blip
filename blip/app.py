@@ -41,6 +41,7 @@ def startup_args():
 
 FAST = 60.0 if "--fast" in sys.argv else 1.0
 HOUR = 3600.0
+HOLD_MS = 550         # press and hold the pet this long (without moving) for the menu
 CHUTE_CHANCE = 0.1     # a dropped pet now and then pops a parachute: a little surprise
 EGG_TIME = 90
 BABY_END = 12 * HOUR
@@ -155,6 +156,7 @@ class App:
             root.createcommand("::tk::mac::ReopenApplication", self.reopen)
             root.createcommand("::tk::mac::ShowPreferences", lambda: self.open_window("settings"))
             root.createcommand("::tk::mac::Quit", self.quit)
+            root.after(300, lambda: plat.mac_show_in_dock(bool(self.cfg.get("mac_dock"))))
         self.cv = tk.Canvas(root, width=self.W, height=self.H, bg=KEY, highlightthickness=0, bd=0)
         self.cv.pack()
         self.font = kit.F["small"]
@@ -1813,8 +1815,19 @@ class App:
             self.drag = None
             self.open_window("timers")
             return
-        self.drag = [e.x_root - self.x, e.y_root - self.y, e.x_root, e.y_root, False]
+        self.drag = d = [e.x_root - self.x, e.y_root - self.y, e.x_root, e.y_root, False]
         self.trail = []
+        # press and hold opens the menu: works with any mouse or trackpad, whatever the right button is
+        self.root.after(HOLD_MS, lambda: self._hold(d))
+
+    def _hold(self, d):
+        if self.drag is not d or d[4]:
+            return                         # released, or it turned into a drag
+        self.drag = None
+
+        class E:
+            x_root, y_root = d[2], d[3]
+        self.on_menu(E())
 
     def on_drag(self, e):
         d = self.drag

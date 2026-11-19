@@ -137,6 +137,44 @@ class WindowTests(unittest.TestCase):
                 self.assertTrue(m.closed)          # away for a while: close
         a.menu = None
 
+    def test_press_and_hold_opens_menu_but_drag_does_not(self):
+        from blip import app as A
+        a = self.app
+
+        class Ev:
+            x_root, y_root = int(a.x + 100), int(a.y + 120)
+        if a.menu:
+            a.menu.close()
+        a.on_press(Ev())
+        end = time.time() + A.HOLD_MS / 1000 + 0.4
+        while time.time() < end:
+            a.root.update()
+            time.sleep(0.02)
+        self.assertIsNotNone(a.menu)
+        a.on_release(Ev())                     # letting go doesn't pat or close it
+        self.assertIsNotNone(a.menu)
+        a.menu.close()
+        a.on_press(Ev())                       # press, then move: that's a drag, no menu
+
+        class Moved:
+            x_root, y_root = Ev.x_root + 40, Ev.y_root - 30
+        a.on_drag(Moved())
+        end = time.time() + A.HOLD_MS / 1000 + 0.4
+        while time.time() < end:
+            a.root.update()
+            time.sleep(0.02)
+        self.assertIsNone(a.menu)
+        a.on_release(Moved())
+
+    def test_mac_wheel_steps(self):
+        from blip.kit import wheel_steps
+        self.assertEqual(wheel_steps(-3, mac=True), 3)      # Mac: small numbers, used as they are
+        self.assertEqual(wheel_steps(2, mac=True), -2)
+        self.assertEqual(wheel_steps(-40, mac=True), 8)     # fast flick, capped
+        self.assertEqual(wheel_steps(-120, mac=False), 1)   # Windows: one notch
+        self.assertEqual(wheel_steps(240, mac=False), -2)
+        self.assertEqual(wheel_steps(-30, mac=False), 1)    # precision touchpads send less than 120
+
     def test_menu_tools_row(self):
         a = self.app
         ran = []

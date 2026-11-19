@@ -136,6 +136,7 @@ jobs:
           pid=$!
           sleep 12
           if ! kill -0 $pid 2>/dev/null; then echo "Blip.app exited early"; exit 1; fi
+          echo "Dock check (UIElement = no Dock icon):"; lsappinfo info -only ApplicationType $pid || true
           kill $pid
           # HTTPS must work from inside the bundle (updates, Basecamp) without the build machine's Python
           sudo mv /Library/Frameworks/Python.framework /tmp/pyfw-hidden 2>/dev/null || true

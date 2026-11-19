@@ -131,6 +131,30 @@ def _mac_screens():
     return out
 
 
+def mac_show_in_dock(show):
+    """macOS: show or hide Blip's Dock icon (and app menu) at run time.
+    Hidden = 'accessory' app, like menu-bar utilities. Returns True if it worked."""
+    if not MAC:
+        return False
+    try:
+        objc = ctypes.cdll.LoadLibrary("/usr/lib/libobjc.A.dylib")
+        ctypes.cdll.LoadLibrary("/System/Library/Frameworks/AppKit.framework/AppKit")
+        objc.objc_getClass.restype = ctypes.c_void_p
+        objc.objc_getClass.argtypes = [ctypes.c_char_p]
+        objc.sel_registerName.restype = ctypes.c_void_p
+        objc.sel_registerName.argtypes = [ctypes.c_char_p]
+        send = objc.objc_msgSend
+        send.restype = ctypes.c_void_p
+        send.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        app = send(objc.objc_getClass(b"NSApplication"), objc.sel_registerName(b"sharedApplication"))
+        send.restype = ctypes.c_bool
+        send.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_long]
+        # NSApplicationActivationPolicyRegular = 0, Accessory = 1
+        return bool(send(app, objc.sel_registerName(b"setActivationPolicy:"), 0 if show else 1))
+    except Exception:
+        return False
+
+
 def work_area_at(root, x, y):
     """Usable desktop (l, t, r, b) of the screen nearest x, y - i.e. without taskbar / Dock / menu bar."""
     if WIN:

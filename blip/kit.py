@@ -480,6 +480,19 @@ class SettingRow(tk.Frame):
         self.right.pack(side="right", padx=(round(12 * S), 0))
 
 
+def wheel_steps(delta, mac=None):
+    """Scroll units for a <MouseWheel> delta. Windows sends multiples of 120 per notch; Tk on
+    macOS sends small numbers (1-10, more for a fast trackpad flick), so dividing by 120 there
+    made every scroll 0 and Settings couldn't scroll."""
+    mac = sys.platform == "darwin" if mac is None else mac
+    if not delta:
+        return 0
+    if mac:
+        return max(-8, min(8, -int(delta)))
+    steps = int(-delta / 120)
+    return steps or (-1 if delta > 0 else 1)
+
+
 class Scroller(tk.Frame):
     """Vertically scrolling container; put children in .inner. Mouse wheel scrolls."""
 
@@ -497,7 +510,7 @@ class Scroller(tk.Frame):
     def bind_all_wheel(self):
         def wheel(e):
             if self.inner.winfo_height() > self.cv.winfo_height():
-                self.cv.yview_scroll(int(-e.delta / 120), "units")
+                self.cv.yview_scroll(wheel_steps(e.delta), "units")
         self.cv.bind("<Enter>", lambda e: self.cv.bind_all("<MouseWheel>", wheel))
         self.cv.bind("<Leave>", lambda e: self.cv.unbind_all("<MouseWheel>"))
 

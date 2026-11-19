@@ -57,7 +57,8 @@ DEFAULTS = {
     "sound": False,                # quiet by default; Settings > General > Sounds
     "volume": 60,
     "auto_update": True,
-    "menu": {},                    # which right-click menu sections show (see MENU_DEFAULTS)
+    "menu": {},
+    "mac_dock": False,             # macOS: show Blip in the Dock (off: it lives on the desktop only)                    # which right-click menu sections show (see MENU_DEFAULTS)
     "theme": "system",             # dark | light | system (follows Windows / macOS)
     "last_update_check": 0,
     "bc_token": "",
