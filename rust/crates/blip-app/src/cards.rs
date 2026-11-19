@@ -52,7 +52,8 @@ impl CardStack {
             self.cards.retain(|w| w.key != c.key);
         }
         let card = Card::new(c.title, c.body, c.kind, c.icon, c.buttons, scale, fonts);
-        let Some(win) = Overlay::new(el, card.w, card.h, 0, 0, false) else { return };
+        let Some(mut win) = Overlay::new(el, card.w, card.h, 0, 0, false) else { return };
+        win.set_no_activate(true);
         let canvas = Canvas::new(card.w, card.h);
         let key = if c.key.is_empty() { format!("card{}", (now * 1000.0) as u64) } else { c.key.to_string() };
         self.cards.push(CardWin {

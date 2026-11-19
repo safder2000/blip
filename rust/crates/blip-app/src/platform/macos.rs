@@ -22,6 +22,7 @@ pub struct Surface {
     window: Arc<winit::window::Window>,
     scale: f64,
     passthrough: bool,
+    pub no_activate: bool,
 }
 
 impl Surface {
@@ -38,7 +39,13 @@ impl Surface {
                 let _: () = msg_send![ns_window, setHasShadow: false];
             }
         }
-        Surface { view, window: window.clone(), scale: window.scale_factor(), passthrough: false }
+        Surface { view, window: window.clone(), scale: window.scale_factor(), passthrough: false, no_activate: false }
+    }
+
+    /// Make it visible (Blip is an accessory app, so this never activates it).
+    pub fn show(&mut self, window: &winit::window::Window) -> bool {
+        window.set_visible(true);
+        true
     }
 
     /// Show `pixels` (premultiplied 0xAARRGGBB, w x h physical) with the top-left at (x, y) physical.

@@ -47,8 +47,15 @@ pub fn attrs(w: i32, h: i32, x: i32, y: i32) -> winit::window::WindowAttributes 
 impl Overlay {
     pub fn new(el: &ActiveEventLoop, w: i32, h: i32, x: i32, y: i32, click_through: bool) -> Option<Overlay> {
         let window = Arc::new(el.create_window(attrs(w, h, x, y)).ok()?);
-        let surface = platform::Surface::new(&window);
+        let mut surface = platform::Surface::new(&window);
+        // the pet and its poops never take focus (only the menu and cards ask for it)
+        surface.no_activate = click_through;
         Some(Overlay { window, surface, x, y, w, h, shown: false, click_through })
+    }
+
+    /// Cards: shown and clicked without taking focus from your app.
+    pub fn set_no_activate(&mut self, on: bool) {
+        self.surface.no_activate = on;
     }
 
     pub fn id(&self) -> WindowId {
@@ -62,8 +69,7 @@ impl Overlay {
         self.w = cv.w;
         self.h = cv.h;
         if !self.shown {
-            self.window.set_visible(true);
-            self.shown = true;
+            self.shown = self.surface.show(&self.window);
         }
         self.surface.present(&cv.px, cv.w, cv.h, x, y);
         let over = if self.click_through {

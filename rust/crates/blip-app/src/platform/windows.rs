@@ -14,13 +14,15 @@ use windows_sys::Win32::Graphics::Gdi::{
 use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetCursorPos, GetWindowLongPtrW, SetWindowLongPtrW, UpdateLayeredWindow, GWL_EXSTYLE, ULW_ALPHA,
-    WS_EX_LAYERED, WS_EX_TOOLWINDOW,
+    GetCursorPos, GetWindowLongPtrW, SetWindowLongPtrW, ShowWindow, UpdateLayeredWindow, GWL_EXSTYLE, SW_SHOWNOACTIVATE,
+    ULW_ALPHA, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
 pub struct Surface {
     hwnd: HWND,
     pub failures: u64,
+    /// never take focus (the pet, poops, cards): clicking them leaves your app active
+    pub no_activate: bool,
 }
 
 impl Surface {
@@ -30,7 +32,7 @@ impl Surface {
             RawWindowHandle::Win32(h) => h.hwnd.get() as HWND,
             _ => unreachable!("not a Win32 window"),
         };
-        let s = Surface { hwnd, failures: 0 };
+        let s = Surface { hwnd, failures: 0, no_activate: false };
         s.ensure_layered();
         s
     }
@@ -41,7 +43,10 @@ impl Surface {
     fn ensure_layered(&self) {
         unsafe {
             let ex = GetWindowLongPtrW(self.hwnd, GWL_EXSTYLE);
-            let want = (WS_EX_LAYERED | WS_EX_TOOLWINDOW) as isize;
+            let mut want = (WS_EX_LAYERED | WS_EX_TOOLWINDOW) as isize;
+            if self.no_activate {
+                want |= WS_EX_NOACTIVATE as isize;
+            }
             if ex & want != want {
                 SetWindowLongPtrW(self.hwnd, GWL_EXSTYLE, ex | want);
             }
@@ -88,6 +93,18 @@ impl Surface {
             DeleteDC(dc);
             ReleaseDC(null_mut(), screen);
         }
+    }
+
+    /// Make it visible. Windows that never take focus are shown without activating them,
+    /// so a card or the pet appearing never steals the keyboard from what you're typing in.
+    pub fn show(&mut self, window: &winit::window::Window) -> bool {
+        self.ensure_layered();
+        if self.no_activate {
+            unsafe { ShowWindow(self.hwnd, SW_SHOWNOACTIVATE) };
+            return true;
+        }
+        window.set_visible(true);
+        true
     }
 
     /// Windows already lets clicks through see-through pixels of a layered window.
