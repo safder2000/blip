@@ -1159,14 +1159,11 @@ class App:
             self.net = None
             return
         peers = [p for p in self.cfg["manual_peers"].replace(";", ",").split(",")]
+        from .link import team_for
         server = self.cfg.get("server", "")
-        if server and not self.cfg.get("team"):
-            from .link import new_team_code
-            self.cfg["team"] = new_team_code()
-            self.cfg.save()
         self.net = Net(self.cfg["node_id"], self.profile, self.cfg["passphrase"],
                        lambda kind, d: self.post(self.on_net, kind, d),
-                       server=server, team=self.cfg.get("team", ""), manual_peers=peers)
+                       server=server, team=team_for(server, self.cfg.get("team", "")), manual_peers=peers)
         self.net.on_voice = self._voice_packet
         if not self.net.start():
             self.net_error = self.net.error

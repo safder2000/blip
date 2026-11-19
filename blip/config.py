@@ -51,7 +51,7 @@ DEFAULTS = {
     "network": True,
     "dnd": False,
     "server": "",                  # optional Blip server: invite link base, domain or ip:port
-    "team": "",                    # team code for the server (end-to-end key; never sent to the server)
+    "team": "",                    # private team code from an invite link; empty = the server's shared team
     "relay": "",                   # optional "host:port" of a relay (blip.relay) when broadcast is blocked
     "manual_peers": "",            # optional comma-separated IPs to say hello to directly
     "sound": False,                # quiet by default; Settings > General > Sounds
@@ -111,6 +111,11 @@ class Config(dict):
             if self.get("relay") and not self.get("server"):
                 self["server"] = self["relay"]
             self["cfg_version"] = 4
+            changed = True
+        if self.get("cfg_version", 1) < 5:   # v0.7.6: a plain server address means one shared team
+            # (until now Blip made up a private team per person, so colleagues never met)
+            self["team"] = ""
+            self["cfg_version"] = 5
             changed = True
         if changed:
             self.save()

@@ -15,10 +15,11 @@ You don't need one to use Blip. It's an optional extra for teams that aren't all
 ```
 
 - Every pet keeps one connection open to the server, and the server passes messages between pets on the same team.
-- **End-to-end encrypted.** Each pet encrypts every message and every bit of call audio with the team code before sending.
-  The team code is the part after `#` in the invite link. Browsers and Blip never send that part to a server,
-  so the server only sees scrambled data, a random team ID and message sizes.
-  Whoever runs the server can't read messages or listen to calls.
+- **End-to-end encrypted.** Each pet encrypts every message and every bit of call audio with the team key before sending,
+  so the server only passes along scrambled data and sees just a team ID and message sizes.
+  On the shared team the key comes from the server's address, which keeps out anyone sniffing the network.
+  For privacy from whoever runs the server too, use a private team link: its code (the part after `#`) never
+  reaches the server.
 - **Teams are separate.** Different invite links mean different teams. Pets on one team never see pets on another,
   even on the same server.
 - **Voice** is compressed with Opus, about 20 kbps per person. A small server can carry many calls at once.
@@ -109,25 +110,29 @@ Pets reconnect on their own, but an always-on plan works better for calls.
 
 ## 3. Connect the pets
 
-**Easiest:** open your server's address in a browser and click **Make a team link**. You get something like
+Everyone enters the server's address in **Blip → Settings → Office → Online server**, for example
+`https://blip.example.com` or `192.168.1.200:47620`. That's all: everyone who enters the same address is on one
+shared team and sees each other. **Copy link** in that panel gives you the address to send around.
+
+**Private teams:** for a group that should stay separate from everyone else on the server, open the server's
+address in a browser and click **Make a private team link**. You get something like
 
 ```
 https://blip.example.com/#team=3f9c2a7d41b0e85c96aa12f0
 ```
 
-Everyone pastes it into **Blip → Settings → Office → Online server**.
-
-**From Blip:** type the server address (domain, or `IP:port`) into that same field and Blip creates a team code for you.
-Then **Copy invite link** and send the link to your team.
+and only people who paste that exact link see each other. Settings shows which team you're on, and
+*Join the shared team instead* takes you back.
 
 The status line under the field shows *Connected to … · N teammates online*.
-Teammates appear in the right-click menu and in Buddies, marked "online", with the same call and message buttons.
+Teammates appear in the right-click menu with a small globe, and the same call and message buttons.
 If both PCs have a microphone, calls get a **Talk** button. Use headsets, since there's no echo cancelling.
 
 ## Good to know
 
-- **The invite link is the key.** Anyone with it can join that team, so share it like a password.
-  To remove someone, make a new team link and give it only to the people who should stay.
+- **Who can join:** anyone who knows the address can join the shared team. Fine for a company server; for a
+  public one, use private team links. Anyone with a private link can join that team, so share it like a password.
+  To remove someone, make a new private link and give it only to the people who should stay.
 - **The server stores nothing:** no accounts, no history, no logs of messages.
   Restart it whenever you like; pets reconnect within a few seconds.
 - **Health check:** `GET /health` returns JSON with how many pets and teams are connected.

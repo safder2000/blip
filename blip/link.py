@@ -70,7 +70,21 @@ def parse(text):
 
 
 def invite_link(info, team):
-    return f"{info['web']}/#team={team}"
+    """The link to share: the plain address for the server's shared team, address#team=... for a private one."""
+    return f"{info['web']}/#team={team}" if team else info["web"]
+
+
+def shared_team(info):
+    """Team code for everyone who simply enters this server's address."""
+    return "shared:" + info["web"].lower()
+
+
+def team_for(server, team):
+    """The team code a pet uses: its private team if it has one, else the server's shared team."""
+    info = parse(server) if server else None
+    if not info:
+        return ""
+    return team or info["team"] or shared_team(info)
 
 
 # ------------------------------------------------------------------ team crypto

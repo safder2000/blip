@@ -148,6 +148,23 @@ class ServerTests(unittest.TestCase):
             self.assertNotIn(secret, raw)          # the server only ever sees ciphertext
         self.assertEqual(self.srv.stats()["teams"], 1)
 
+    def test_plain_address_means_one_shared_team(self):
+        """Colleagues who just type the server's address (in any spelling) meet; an invite link is private."""
+        addr = f"127.0.0.1:{self.srv.port}"
+        self.assertEqual(L.team_for(f"http://{addr}/", ""), L.team_for(addr, ""))
+        self.assertNotEqual(L.team_for(addr, ""), L.team_for(addr + "#team=private99", ""))
+        from blip.net import Net
+        nets = []
+        for name, typed in (("Ann", f"http://{addr}"), ("Ben", addr)):
+            n = Net(uuid.uuid4().hex, lambda name=name: {"name": name}, "office", Inbox(), udp_port=free_udp_port(),
+                    tcp_port=0, announce_port=free_udp_port(), server=typed, team=L.team_for(typed, ""),
+                    manual_peers=())
+            self.assertTrue(n.start())
+            nets.append(n)
+            self.nets.append(n)
+        self.assertTrue(wait(lambda: nets[0].online() and nets[1].online(), 10))
+        self.assertEqual(self.srv.stats()["teams"], 1)
+
     def test_other_teams_stay_invisible(self):
         a, _ = self.pet("Ann", f"127.0.0.1:{self.srv.port}#team=team-one-1")
         c, _ = self.pet("Cat", f"127.0.0.1:{self.srv.port}#team=team-two-2")
@@ -187,6 +204,10 @@ class LinkTests(unittest.TestCase):
         self.assertIsNone(L.parse(""))
         inv = L.invite_link(L.parse("192.168.1.200:30620"), "abc123")
         self.assertEqual(inv, "http://192.168.1.200:30620/#team=abc123")
+        self.assertEqual(L.invite_link(L.parse("blip.example.com"), ""), "https://blip.example.com")
+        self.assertEqual(L.team_for("https://blip.example.com/", ""), L.team_for("blip.example.com", ""))
+        self.assertEqual(L.team_for("blip.example.com", "mine"), "mine")
+        self.assertEqual(L.team_for("", "mine"), "")
         self.assertEqual(L.parse(inv)["team"], "abc123")
 
     def test_box(self):

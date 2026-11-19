@@ -274,6 +274,17 @@ class ThemeDefaultTests(unittest.TestCase):
         (d / "picked.json").write_text(json.dumps({"cfg_version": 2, "theme": "light", "theme_chosen": True}))
         self.assertEqual(Config(d / "picked.json")["theme"], "light")
 
+    def test_old_made_up_team_codes_are_dropped(self):
+        import json
+        from pathlib import Path
+        from blip.config import Config
+        d = Path(tempfile.mkdtemp())
+        (d / "c.json").write_text(json.dumps({"cfg_version": 4, "server": "https://blip.example.com",
+                                              "team": "c0ffee1234"}))
+        c = Config(d / "c.json")
+        self.assertEqual(c["team"], "")                 # now on the server's shared team
+        self.assertEqual(c["server"], "https://blip.example.com")
+
     def test_follows_os_flip(self):
         from unittest import mock
         from blip import kit, plat

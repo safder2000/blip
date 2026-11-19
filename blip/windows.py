@@ -501,10 +501,14 @@ class SettingsWindow(kit.Window):
         self.srv_label.pack(side="left")
         btns = tk.Frame(b4, bg=kit.SURFACE)
         btns.pack(fill="x", pady=(round(10 * S), 0))
-        self.srv_copy = Btn(btns, "Copy invite link", self._copy_invite, kind="soft", small=True, icon="open")
+        self.srv_copy = Btn(btns, "Copy link", self._copy_invite, kind="soft", small=True, icon="open")
         self.srv_copy.pack(side="left")
         self.srv_leave = Btn(btns, "Disconnect", lambda: self._set_server(""), kind="ghost", small=True, icon="x")
         self.srv_leave.pack(side="left", padx=(round(6 * S), 0))
+        self.srv_team = muted(b4, "", wraplength=round(420 * S))
+        self.srv_team.pack(anchor="w", pady=(round(8 * S), 0))
+        self.srv_shared = Btn(b4, "Join the shared team instead", lambda: self._leave_private(), kind="ghost",
+                              small=True)
         self._srv_shown = None
 
         section(f, "Other floors (optional)")
@@ -535,7 +539,8 @@ class SettingsWindow(kit.Window):
             self.srv_label.config(text="That doesn't look like a link or an address.", fg=kit.DANGER)
             self._srv_shown = ("bad",)
             return
-        team = info["team"] or (cfg.get("team") if cfg.get("server") else "") or link.new_team_code()
+        same_server = info["web"] == (link.parse(cfg.get("server", "")) or {}).get("web")
+        team = info["team"] or (cfg.get("team", "") if same_server else "")
         base = info["web"] if not text.startswith(("ws://", "wss://")) else text.split("#")[0]
         if base == cfg.get("server") and team == cfg.get("team"):
             self.srv_field.set(base)
@@ -545,16 +550,21 @@ class SettingsWindow(kit.Window):
         self._srv_shown = None
         self.app.restart_net()
 
+    def _leave_private(self):
+        self._cfg(team="")
+        self._srv_shown = None
+        self.app.restart_net()
+
     def _copy_invite(self):
         from . import link
         cfg = self.app.cfg
         info = link.parse(cfg.get("server", ""))
-        if not info or not cfg.get("team"):
+        if not info:
             return
-        inv = link.invite_link(info, cfg["team"])
+        inv = link.invite_link(info, cfg.get("team", ""))
         self.top.clipboard_clear()
         self.top.clipboard_append(inv)
-        self.srv_label.config(text="Invite link copied. Send it to your team.", fg=kit.OK)
+        self.srv_label.config(text="Link copied. Anyone who pastes it joins your team.", fg=kit.OK)
         self._srv_shown = ("copied", time.time())
 
     def _private(self, on):
@@ -615,6 +625,14 @@ class SettingsWindow(kit.Window):
         pixel_box(d, 0, 0, n, n, 1, col)
         self.srv_copy.set_enabled(on)
         self.srv_leave.set_enabled(on)
+        private = on and bool(app.cfg.get("team"))
+        self.srv_team.config(text="" if not on else (
+            "Team: private (from an invite link). Only people with that link see you." if private else
+            "Team: everyone using this server. Colleagues just enter the same address."))
+        if private:
+            self.srv_shared.pack(anchor="w", pady=(round(4 * self.S), 0))
+        else:
+            self.srv_shared.pack_forget()
 
     def refresh_office(self):
         self.refresh_server()

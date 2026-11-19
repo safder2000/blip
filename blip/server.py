@@ -236,9 +236,11 @@ h1{font-size:22px}code{background:#262626;padding:3px 7px;border-radius:4px;word
 #link{display:block;margin:10px 0;padding:10px;background:#262626;border-radius:6px}</style></head><body>
 <h1>Blip server is running</h1>
 <p class="m">{pets} pets online in {teams} teams.</p>
-<p>Make an invite link for your team and paste it into Blip &rarr; Settings &rarr; Office &rarr; Online server.
-Everyone who uses the same link is on the same team.</p>
-<button onclick="mk()">Make a team link</button><code id="link" hidden></code>
+<p>To connect, enter this address in Blip &rarr; Settings &rarr; Office &rarr; Online server:</p>
+<code>{addr}</code>
+<p>Everyone who enters it is on one shared team. Want a team of your own on this server?
+Make a private link and give it only to your teammates.</p>
+<button onclick="mk()">Make a private team link</button><code id="link" hidden></code>
 <p class="m">The part after <code>#</code> is your team's secret. Browsers and Blip never send it to this server,
 so the server can't read your messages or listen to calls.</p>
 <script>function mk(){var a=new Uint8Array(12);crypto.getRandomValues(a);
