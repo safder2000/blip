@@ -1,16 +1,18 @@
 name: release
 
-# Push a tag like v0.5.0 ->
-#   Windows: tests, Blip.exe (PyInstaller), BlipSetup-0.5.0.exe (Inno Setup), GitHub release
-#   macOS:   tests, Blip.app (PyInstaller), Blip-mac-arm64.zip added to the same release
-# Every file gets a .sha256 next to it. Installed Blips pick the new version up on their own.
+# Push a tag like v0.8.0 ->
+#   Windows: tests, Blip.exe (Rust), BlipSetup-0.8.0.exe (Inno Setup), GitHub release
+#   macOS:   Blip.app (Rust) zipped as Blip-mac-arm64.zip, added to the same release
+#   Linux:   the Blip server as one static binary
+# Every file gets a .sha256 next to it. Installed Blips (Python or Rust) pick the new version up on
+# their own. A tag with a dash (v0.8.0-rc.1) makes a pre-release, which installed Blips ignore.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:          # re-run just the Mac build for an existing release
     inputs:
       tag:
-        description: "Release tag, e.g. v0.5.0"
+        description: "Release tag, e.g. v0.8.0"
         required: true
 
 permissions:
@@ -27,9 +29,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install build tools
-        run: python -m pip install --upgrade pip pyinstaller==6.11.1 pystray==0.19.5 pillow==11.0.0 sounddevice==0.5.1
-
       - name: Stamp version
         shell: pwsh
         env:
@@ -41,7 +40,8 @@ jobs:
           python packaging/stamp.py $v
 
       - name: Tests
-        run: python -m unittest discover -s tests -t . -v
+        working-directory: rust
+        run: cargo test --workspace --release
 
       - name: Get libopus (voice compression)
         shell: pwsh
@@ -51,14 +51,30 @@ jobs:
           python -c "import zipfile,glob; z=zipfile.ZipFile(glob.glob('opusdl/*.whl')[0]); open('vendor/opus.dll','wb').write(z.read('discord/bin/libopus-0.x64.dll'))"
 
       - name: Build Blip.exe
-        run: pyinstaller --noconfirm --clean --windowed --name Blip --icon assets/blip.ico --hidden-import pystray._win32 --add-binary "vendor/opus.dll;." blip_main.pyw
+        working-directory: rust
+        run: cargo build --release -p blip-app
 
-      - name: Check the bundled Opus works
+      - name: Stage files
         shell: pwsh
         run: |
-          $p = Start-Process dist\Blip\Blip.exe -ArgumentList "--selftest-opus" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { Write-Error "libopus missing from the build"; exit 1 }
-          "opus ok"
+          New-Item -ItemType Directory -Force dist\Blip | Out-Null
+          Copy-Item rust\target\release\blip.exe dist\Blip\Blip.exe
+          Copy-Item vendor\opus.dll dist\Blip\opus.dll
+          Get-ChildItem dist\Blip
+
+      - name: Self-tests (bundled Opus, HTTPS, starts and keeps running)
+        shell: pwsh
+        run: |
+          foreach ($t in "--selftest-opus", "--selftest-https") {
+            $p = Start-Process dist\Blip\Blip.exe -ArgumentList $t -Wait -PassThru
+            if ($p.ExitCode -ne 0) { Write-Error "$t failed"; exit 1 }
+          }
+          $env:BLIP_DATA = "$env:RUNNER_TEMP\blipdata"
+          $p = Start-Process dist\Blip\Blip.exe -PassThru
+          Start-Sleep 10
+          if ($p.HasExited) { Write-Error "Blip.exe exited early ($($p.ExitCode))"; exit 1 }
+          Stop-Process $p.Id
+          "self-tests ok"
 
       - name: Build installer
         shell: pwsh
@@ -79,7 +95,9 @@ jobs:
           $exe = "dist\$name"
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
           "$hash  $name" | Out-File -FilePath "$exe.sha256" -Encoding ascii -NoNewline
-          gh release create "${{ github.ref_name }}" $exe "$exe.sha256" --title "Blip $env:VERSION" --generate-notes
+          $pre = @()
+          if ("${{ github.ref_name }}".Contains("-")) { $pre = @("--prerelease") }
+          gh release create "${{ github.ref_name }}" $exe "$exe.sha256" --title "Blip $env:VERSION" --generate-notes @pre
 
   mac:
     needs: build
@@ -96,9 +114,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install build tools
-        run: python -m pip install --upgrade pip pyinstaller==6.11.1 pillow==11.0.0 sounddevice==0.5.1 certifi==2024.8.30
-
       - name: Stamp version
         env:
           BC_CLIENT_ID: ${{ secrets.BASECAMP_CLIENT_ID }}
@@ -108,42 +123,37 @@ jobs:
           echo "VERSION=$v" >> "$GITHUB_ENV"
           python packaging/stamp.py "$v"
 
-      - name: Tests
-        run: python -m unittest discover -s tests -t . -v
-
       - name: Icon
         run: |
+          python -m pip install pillow==11.0.0
           python packaging/make_icon.py --iconset
           iconutil -c icns assets/blip.iconset -o assets/blip.icns
 
       - name: Build libopus (voice compression)
         run: |
-          curl -fsSL -o opus.tar.gz https://downloads.xiph.org/releases/opus/opus-1.5.2.tar.gz             || curl -fsSL -o opus.tar.gz https://github.com/xiph/opus/releases/download/v1.5.2/opus-1.5.2.tar.gz
+          curl -fsSL -o opus.tar.gz https://downloads.xiph.org/releases/opus/opus-1.5.2.tar.gz || curl -fsSL -o opus.tar.gz https://github.com/xiph/opus/releases/download/v1.5.2/opus-1.5.2.tar.gz
           tar xzf opus.tar.gz
-          cmake -S opus-1.5.2 -B opus-build -DBUILD_SHARED_LIBS=ON -DCMAKE_BUILD_TYPE=Release             -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DCMAKE_OSX_ARCHITECTURES=arm64 -DOPUS_BUILD_TESTING=OFF -DOPUS_BUILD_PROGRAMS=OFF
+          cmake -S opus-1.5.2 -B opus-build -DBUILD_SHARED_LIBS=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DCMAKE_OSX_ARCHITECTURES=arm64 -DOPUS_BUILD_TESTING=OFF -DOPUS_BUILD_PROGRAMS=OFF
           cmake --build opus-build --config Release -j 4
           mkdir -p vendor
           cp "$(ls opus-build/libopus.*.dylib | head -1)" vendor/libopus.0.dylib
           install_name_tool -id @rpath/libopus.0.dylib vendor/libopus.0.dylib
-          ls -la vendor
 
       - name: Build Blip.app
-        run: pyinstaller --noconfirm --clean packaging/blip_mac.spec
-
-      - name: Smoke test the app starts
         run: |
-          ./dist/Blip.app/Contents/MacOS/Blip &
+          (cd rust && MACOSX_DEPLOYMENT_TARGET=11.0 cargo build --release -p blip-app)
+          bash packaging/make_mac_app.sh "$VERSION" rust/target/release/blip vendor/libopus.0.dylib dist
+
+      - name: Smoke test the app
+        run: |
+          ./dist/Blip.app/Contents/MacOS/Blip --selftest-opus
+          ./dist/Blip.app/Contents/MacOS/Blip --selftest-https
+          BLIP_DATA="$RUNNER_TEMP/blipdata" ./dist/Blip.app/Contents/MacOS/Blip &
           pid=$!
           sleep 12
           if ! kill -0 $pid 2>/dev/null; then echo "Blip.app exited early"; exit 1; fi
           echo "Dock check (UIElement = no Dock icon):"; lsappinfo info -only ApplicationType $pid || true
           kill $pid
-          # HTTPS must work from inside the bundle (updates, Basecamp) without the build machine's Python
-          sudo mv /Library/Frameworks/Python.framework /tmp/pyfw-hidden 2>/dev/null || true
-          ./dist/Blip.app/Contents/MacOS/Blip --selftest-https
-          ./dist/Blip.app/Contents/MacOS/Blip --selftest-opus
-          sudo mv /tmp/pyfw-hidden /Library/Frameworks/Python.framework 2>/dev/null || true
-          if [ -f "$HOME/Library/Application Support/Blip/error.log" ]; then cat "$HOME/Library/Application Support/Blip/error.log"; exit 1; fi
 
       - name: Upload to the release
         env:

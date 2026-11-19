@@ -37,4 +37,15 @@ out.write_text(
     f"BC_CLIENT_ID = {cid!r}\n"
     f"BC_CLIENT_SECRET = {secret!r}\n",
     encoding="utf-8")
+# the Rust app: workspace version, and the integration as build-time env for cargo (never printed)
+cargo = Path(__file__).resolve().parent.parent / "rust" / "Cargo.toml"
+if cargo.exists():
+    import re
+    text = cargo.read_text(encoding="utf-8")
+    text = re.sub(r'(\[workspace\.package\][^\[]*?version = ")[^"]*(")', lambda m: m.group(1) + version + m.group(2), text, count=1)
+    cargo.write_text(text, encoding="utf-8")
+env_file = os.environ.get("GITHUB_ENV")
+if env_file and cid and secret:
+    with open(env_file, "a", encoding="utf-8") as f:
+        f.write(f"BLIP_BC_CLIENT_ID={cid}\nBLIP_BC_CLIENT_SECRET={secret}\n")
 print("stamped", version, "- Basecamp integration built in:", ("yes" + note) if (cid and secret) else "no")
