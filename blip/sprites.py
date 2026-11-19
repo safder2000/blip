@@ -360,7 +360,7 @@ _F = {
     "=": "00 00 1F 00 1F 00 00", "@": "0E 11 17 15 17 10 0E",
     "\x01": "1F 11 0A 04 0A 11 1F",   # hourglass
     "\x02": "04 0E 0E 0E 1F 00 04",   # bell
-    "\x03": "18 1C 0C 06 07 03 00",   # phone handset
+    "\x03": "00 18 18 10 0B 07 00",   # phone handset
     "\x04": "00 1F 1B 15 11 1F 00",   # envelope
     "\x05": "00 01 03 16 1C 08 00",   # check
     "\x06": "0E 04 0E 15 17 11 0E",   # stopwatch
@@ -385,6 +385,29 @@ FONT = {k: [int(b, 16) for b in v.split()] for k, v in _F.items()}
 ICON = {"hourglass": "\x01", "bell": "\x02", "phone": "\x03", "mail": "\x04", "check": "\x05",
         "stopwatch": "\x06", "heart": "\x07", "task": "\x08"}
 ICON.update({_n: chr(0xE000 + _i) for _i, _n in enumerate(_EXTRA)})
+
+
+# Bigger icons for buttons with room to spare (rows of 0/1, drawn with draw_bitmap).
+BIG = {
+    "phone": ["011000000",      # handset: earpiece top-left, mouthpiece bottom-right
+              "111100000",
+              "111000000",
+              "011000000",
+              "011000000",
+              "001100010",
+              "000111111",
+              "000011111",
+              "000000110"],
+}
+
+
+def draw_bitmap(canvas, x, y, rows, px, color, tags=()):
+    for r, line in enumerate(rows):
+        for c, bit in enumerate(line):
+            if bit == "1":
+                canvas.create_rectangle(x + c * px, y + r * px, x + (c + 1) * px, y + (r + 1) * px,
+                                        fill=color, width=0, tags=tags)
+    return len(rows[0]) * px
 
 
 def glyph(ch):

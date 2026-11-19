@@ -4,9 +4,12 @@ import time
 import tkinter as tk
 
 from . import kit
-from .sprites import ICON, PALETTES, build_egg, build_pet, draw_text, text_width
+from .sprites import BIG, ICON, PALETTES, build_egg, build_pet, draw_bitmap, draw_text, text_width
 from .ui import KEY, make_overlay, pixel_box
 
+
+
+CALL_GREEN, CALL_HOVER = "#2fb865", "#28a359"
 
 
 class PopMenu:
@@ -228,10 +231,22 @@ class PopMenu:
         for bx0, by0, bx1, by1, i in self.person_buttons(y0, y1, it):
             icon, cmd, en, _tip = it["buttons"][i]
             hov = self.hl == ("btn", id(it), i) and en
-            pixel_box(cv, bx0, by0, bx1, by1, p, kit.ACCENT if hov else kit.TILE, "fg")
-            gw = text_width(ICON[icon], self.ip)
-            col = kit.ON_ACCENT if hov else (kit.ACCENT if en else kit.OFF)
-            draw_text(cv, (bx0 + bx1 - gw) / 2, (by0 + by1 - 7 * self.ip) / 2, ICON[icon], self.ip, col, "fg")
+            if icon == "phone":         # phone-app style: green button, white handset
+                fill = (CALL_HOVER if hov else CALL_GREEN) if en else kit.TILE
+                col = "#ffffff" if en else kit.OFF
+            else:
+                fill = kit.ACCENT if hov else kit.TILE
+                col = kit.ON_ACCENT if hov else (kit.ACCENT if en else kit.OFF)
+            pixel_box(cv, bx0, by0, bx1, by1, p, fill, "fg")
+            if icon in BIG:
+                rows = BIG[icon]
+                bp = max(1, round(1.5 * S))
+                bw, bh = len(rows[0]) * bp, len(rows) * bp
+                draw_bitmap(cv, (bx0 + bx1 - bw) / 2, (by0 + by1 - bh) / 2, rows, bp, col, "fg")
+            else:
+                gw = text_width(ICON[icon], self.ip)
+                draw_text(cv, (bx0 + bx1 - gw) / 2, (by0 + by1 - 7 * self.ip) / 2, ICON[icon], self.ip, col,
+                          "fg")
 
     # ------------------------------------------------ interaction
     def hit(self, x, y):
