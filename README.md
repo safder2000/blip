@@ -22,7 +22,7 @@ Or download `BlipSetup-x.y.z.exe` from the [latest release](https://github.com/s
 curl -fsSL https://raw.githubusercontent.com/safder2000/blip/main/install-mac.sh | bash
 ```
 
-Nothing else is needed: Python is bundled inside the app. Blip updates itself.
+Nothing else is needed: Blip is a single small app with nothing to install alongside it. It updates itself.
 
 ## Use
 
@@ -38,9 +38,14 @@ server's invite link in Settings → Office → Online server. To host your own 
 
 ## Development
 
+The app is written in Rust (`rust/`); see [rust/README.md](rust/README.md).
+
 ```
-python blip_main.pyw                          # run from source (Python 3.10+)
-python -m unittest discover -s tests -t .     # tests
+cd rust
+cargo run --release -p blip-app               # run the pet
+cargo test --workspace                        # tests
 ```
 
-Push a tag like `v1.2.3` to build and publish a release for Windows and Mac.
+The older Python app (`blip/`) is kept for reference and for its tests of the online server.
+Push a tag like `v1.2.3` to build and publish a release for Windows and Mac (a tag with a dash,
+like `v1.2.3-rc.1`, makes a pre-release that installed Blips ignore).
