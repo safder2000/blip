@@ -5,7 +5,7 @@ import tkinter as tk
 
 from . import kit
 from .sprites import BIG, ICON, PALETTES, build_egg, build_pet, draw_bitmap, draw_text, text_width
-from .ui import KEY, make_overlay, pixel_box
+from .ui import KEY, make_overlay, pixel_box, place
 
 
 
@@ -109,7 +109,7 @@ class PopMenu:
             x = px1 - p if px1 + W < r else px0 - W - p
         x = min(max(x, l + 4), r - W - 2 * p - 4)
         y = min(max(y, t + 4), b - H - 2 * p - 4)
-        self.win.geometry(f"{W + 2 * p}x{H + 2 * p}+{int(x)}+{int(y)}")
+        place(self.win, f"{W + 2 * p}x{H + 2 * p}+{int(x)}+{int(y)}")
         self.x, self.y = x, y
 
         cv.bind("<Motion>", self.on_motion)

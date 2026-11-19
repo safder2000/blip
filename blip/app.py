@@ -20,6 +20,7 @@ from .sprites import (BANG, COL, COLORS, FOOD, GH, GW, HEART, ICON, NOTE, PALETT
 from .timers import Timers, describe_days, fmt_clock, parse_clock, parse_duration
 from .notes import Notes, describe_when, parse_when
 from .ui import KEY, CardStack, pixel_box
+from .ui import place as ui_place
 from . import kit
 from . import updater as upd
 from . import windows as W
@@ -476,7 +477,8 @@ class App:
                 self.x, self.dir = lo, 1
             elif self.x > hi:
                 self.x, self.dir = hi, -1
-        self.root.geometry(f"+{int(self.x + jitter)}+{int(self.y)}")
+        # the size too: dragging across screens with different scales makes Windows resize the window
+        self.root.geometry(f"{self.W}x{self.H}+{int(self.x + jitter)}+{int(self.y)}")
         if self.ball:
             self.ptick += 1
             if self.ptick % 2 == 0:
@@ -994,6 +996,7 @@ class App:
         w, h = 8 * P, len(POOP) * P
         l, t, r, b = work_area_at(self.root, px, self.work[3] - 2)
         win = tk.Toplevel(self.root)
+        win.withdraw()
         win.overrideredirect(True)
         win.attributes("-topmost", True)
         plat.make_transparent(win)
@@ -1004,7 +1007,9 @@ class App:
                 if ch != ".":
                     c.create_rectangle(x * P, y * P, (x + 1) * P, (y + 1) * P, width=0,
                                        fill=COL["out"] if ch == "o" else COL["poop"])
-        win.geometry(f"{w}x{h}+{int(px - w / 2)}+{int(b - h)}")
+        ui_place(win, f"{w}x{h}+{int(px - w / 2)}+{int(b - h)}")
+        if not self.st.get("visible", True) and not self.temp_shown:
+            win.withdraw()                 # the pet is hidden: so is its mess
         entry = (win, px)
         c.bind("<Button-1>", lambda e: self.clean_one(entry))
         self.poop_wins.append(entry)

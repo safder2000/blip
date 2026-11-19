@@ -19,11 +19,27 @@ def pixel_box(cv, x0, y0, x1, y1, p, fill, tags=()):
 
 
 def make_overlay(root):
+    """A borderless always-on-top window. It starts hidden: show it with place()."""
     t = tk.Toplevel(root)
+    t.withdraw()
     t.overrideredirect(True)
     t.attributes("-topmost", True)
     make_transparent(t)
     return t
+
+
+def place(win, geom):
+    """Move/size a window and show it. A window that first appears on one screen and then jumps to a
+    screen with a different scale gets resized by Windows, so it is placed before it is shown, and the
+    geometry is set again a moment later in case Windows still adjusted it."""
+    try:
+        win.geometry(geom)
+        if win.state() == "withdrawn":
+            win.deiconify()
+            for ms in (40, 200):
+                win.after(ms, lambda: win.winfo_exists() and win.geometry(geom))
+    except tk.TclError:
+        pass
 
 
 class PixelCard:
@@ -138,7 +154,7 @@ class PixelCard:
         self.win.geometry(f"+{e.x_root - self._off[0]}+{e.y_root - self._off[1]}")
 
     def place(self, x, y):
-        self.win.geometry(f"{self.W}x{self.H}+{int(x)}+{int(y)}")
+        place(self.win, f"{self.W}x{self.H}+{int(x)}+{int(y)}")
 
     def close(self, why="code"):
         if self in self.stack.cards:
