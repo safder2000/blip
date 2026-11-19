@@ -12,6 +12,7 @@ pub const ANIM: f64 = 0.250; // seconds per animation frame
 const HOLD: f64 = 0.55; // press and hold this long (without moving) for the menu
 const BALL_SPEED: f64 = 14.0; // px per step (at 100%) that turns a throw into a ball
 const CHUTE_CHANCE: f64 = 0.1;
+const FIRE_SPEED: f64 = 30.0; // px per step (at 100%): only the hardest flings can catch fire
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Rect {
@@ -85,6 +86,10 @@ pub struct Body {
     pub chute: u32,
     pub bounces: u32,
     lucky: bool,
+    /// this throw is on fire (rare, very fast throws)
+    pub fire: bool,
+    /// which parachute this fall got (sprites::CHUTES)
+    pub chute_style: u8,
     pub wander: bool,
     /// walks slowly (sick)
     pub slow: bool,
@@ -134,6 +139,8 @@ impl Body {
             chute: 0,
             bounces: 0,
             lucky: false,
+            fire: false,
+            chute_style: 0,
             wander: true,
             slow: false,
             scale_hint: 1.0,
@@ -285,6 +292,7 @@ impl Body {
             self.x += self.vx;
             if self.lucky && self.vy > 3.0 * s && ground - self.y > 190.0 * s && self.bounces == 0 {
                 self.chute = 1;
+                self.chute_style = sprites::chute_style((self.random() * 100.0) as u32);
             }
         }
         self.y += self.vy;
@@ -434,15 +442,23 @@ impl Body {
             return Some(Gesture::Pat);
         }
         let (vx, vy) = self.throw_speed(geo, now);
+        Some(self.fling(vx, vy, geo, now))
+    }
+
+    /// Send it flying at (vx, vy) px per step: a throw (also used by tests).
+    pub fn fling(&mut self, vx: f64, vy: f64, geo: &Geo, now: f64) -> Gesture {
         self.vx = vx;
         self.vy = vy;
         self.airborne = true;
         self.chute = 0;
         self.bounces = 0;
-        self.ball = vx.hypot(vy) > BALL_SPEED * geo.s;
+        let speed = vx.hypot(vy);
+        self.ball = speed > BALL_SPEED * geo.s;
         self.lucky = !self.ball && self.random() < CHUTE_CHANCE;
+        // fire is rare: only really hard throws, and even then not every time
+        self.fire = self.ball && speed > FIRE_SPEED * geo.s && self.random() < 0.3;
         self.set(Action::Fall, 1e18, now);
-        Some(Gesture::Thrown { ball: self.ball })
+        Gesture::Thrown { ball: self.ball }
     }
 
     /// True once when a press has been held long enough to open the menu (the app checks each step).
@@ -503,8 +519,13 @@ impl Body {
     pub fn sprite_as(&mut self, look: &Look, geo: &Geo, mood: &str, egg: Option<f64>) -> Sprite {
         if self.ball {
             let colors = if egg.is_some() { (sprites::col::EGG, sprites::col::EGG2, sprites::col::SPOT) } else { sprites::palette(&look.palette) };
-            let mut g = sprites::build_ball(colors, self.spin, egg.is_none(), if self.land > 0 { 0.25 } else { 0.0 });
-            add_trail(&mut g, self.vx, self.vy, geo);
+            let squash = if self.land > 0 { 0.25 } else { 0.0 };
+            let mut g = if egg.is_some() {
+                sprites::build_ball(colors, self.spin, false, squash)
+            } else {
+                sprites::build_species_ball(&look.species, colors, self.spin, true, squash)
+            };
+            add_trail(&mut g, self.vx, self.vy, geo, self.fire);
             return g;
         }
         if let Some(progress) = egg {
@@ -530,7 +551,7 @@ impl Body {
         });
         if self.chute > 0 && self.action == Action::Fall {
             let top_row = g.keys().map(|c| c.1).min().unwrap_or(0);
-            add_chute(&mut g, top_row, self.chute);
+            add_chute(&mut g, top_row, self.chute, self.chute_style);
         }
         g
     }
@@ -544,8 +565,8 @@ pub struct Look {
     pub stage: sprites::Stage,
 }
 
-/// Rocket flame and smoke puffs behind a fast ball.
-pub fn add_trail(g: &mut Sprite, vx: f64, vy: f64, geo: &Geo) {
+/// What streams behind a thrown pet: a faint wind streak, or (rarely, very fast throws) fire.
+pub fn add_trail(g: &mut Sprite, vx: f64, vy: f64, geo: &Geo, fire: bool) {
     let v = vx.hypot(vy);
     if v < 8.0 * geo.s {
         return;
@@ -554,45 +575,78 @@ pub fn add_trail(g: &mut Sprite, vx: f64, vy: f64, geo: &Geo) {
     let (cx, cy) = (16.0, GH as f64 - 8.5);
     let (xmin, xmax) = (-geo.ox / geo.p, (geo.w - geo.ox) / geo.p - 1);
     let ymin = -geo.bub_h / geo.p;
-    let n = 2 + 3.min((v / (8.0 * geo.s)) as i32);
-    let colors: [Color; 5] = [0xfff1a8, 0xffb347, 0xff6b3d, 0xcfc8dc, 0xb3abc4];
-    for k in 0..n {
-        let d = 9.0 + 3.2 * k as f64;
-        let size = if k < 2 { 3 } else { 2 };
-        let (px, py) = ((cx + ux * d) as i32, (cy + uy * d) as i32);
-        for dx in 0..size {
-            for dy in 0..size {
-                let (x, y) = (px + dx - size / 2, py + dy - size / 2);
-                if (xmin..=xmax).contains(&x) && ymin <= y && y < GH {
-                    g.entry((x, y)).or_insert(colors[(k as usize).min(4)]);
+    let put = |g: &mut Sprite, x: i32, y: i32, c: Color| {
+        if (xmin..=xmax).contains(&x) && ymin <= y && y < GH {
+            g.entry((x, y)).or_insert(c);
+        }
+    };
+    if fire {
+        let n = 2 + 3.min((v / (8.0 * geo.s)) as i32);
+        let colors: [Color; 5] = [0xfff1a8, 0xffb347, 0xff6b3d, 0xcfc8dc, 0xb3abc4];
+        for k in 0..n {
+            let d = 9.0 + 3.2 * k as f64;
+            let size = if k < 2 { 3 } else { 2 };
+            let (px, py) = ((cx + ux * d) as i32, (cy + uy * d) as i32);
+            for dx in 0..size {
+                for dy in 0..size {
+                    put(g, px + dx - size / 2, py + dy - size / 2, colors[(k as usize).min(4)]);
                 }
             }
+        }
+        return;
+    }
+    // wind: two or three thin, broken streaks, longer the faster it goes
+    let (nx, ny) = (-uy, ux);
+    let len = (4.0 + v / geo.s * 0.35).min(12.0);
+    for (lane, off, col) in [(0, -4.0, 0xdfeefc), (1, 0.5, 0xeef6ff), (2, 4.5, 0xd2e4f6)] {
+        if lane == 2 && v < 16.0 * geo.s {
+            continue;
+        }
+        let start = 9.0 + lane as f64 * 1.5;
+        let mut d = start;
+        while d < start + len {
+            put(g, (cx + ux * d + nx * off).round() as i32, (cy + uy * d + ny * off).round() as i32, col);
+            d += if ((d - start) as i32) % 4 == 3 { 2.0 } else { 1.0 };
         }
     }
 }
 
-/// A striped pixel parachute above the pet's head, swaying a little.
-pub fn add_chute(g: &mut Sprite, top_row: i32, chute: u32) {
+/// A flat, wide pixel parachute above the pet's head, swaying a little; `style` from `sprites::CHUTES`.
+pub fn add_chute(g: &mut Sprite, top_row: i32, chute: u32, style: u8) {
     let sway = ((chute as f64 / 10.0).sin() * 1.5).round_ties_even() as i32; // Python's round()
     let cx = GW / 2 + sway;
-    let top = top_row - 11;
-    let widths = [6, 10, 12, 13, 13];
-    let (red, cream, ink) = (0xef5b6b, 0xfff4e6, sprites::col::OUT);
+    let top = top_row - 12;
+    let widths = [8, 12, 15, 17, 18, 18];
+    let (a, b, _) = sprites::CHUTES[(style as usize).min(sprites::CHUTES.len() - 1)];
+    let rainbow: [Color; 6] = [0xff4d6d, 0xffa23f, 0xffd23f, 0x7ad97f, 0x4ba3ff, 0x8a5cf6];
+    let ink = sprites::col::OUT;
     for (i, hw) in widths.iter().enumerate() {
         let y = top + i as i32;
         for x in (cx - hw)..(cx + hw) {
             let edge = x == cx - hw || x == cx + hw - 1 || i == 0;
-            let stripe = (x - cx + 13).div_euclid(4).rem_euclid(2) == 1;
-            g.insert((x, y), if edge { ink } else if stripe { red } else { cream });
+            let band = (x - cx + 18).div_euclid(4);
+            let c = if edge {
+                ink
+            } else if style == 5 {
+                rainbow[band.rem_euclid(6) as usize]
+            } else if style == 4 && (x * 7 + y * 3).rem_euclid(11) == 0 {
+                0xffffff // stars on the galaxy one
+            } else if band.rem_euclid(2) == 1 {
+                a
+            } else {
+                b
+            };
+            g.insert((x, y), c);
         }
     }
+    // scalloped hem
     let y = top + widths.len() as i32;
-    for x in (cx - 13)..(cx + 13) {
-        if matches!((x - cx).rem_euclid(4), 0 | 1) {
+    for x in (cx - 18)..(cx + 18) {
+        if matches!((x - cx).rem_euclid(4), 0..=2) {
             g.insert((x, y), ink);
         }
     }
-    for (sx, ex) in [(cx - 12, GW / 2 - 6), (cx - 4, GW / 2 - 3), (cx + 3, GW / 2 + 2), (cx + 11, GW / 2 + 5)] {
+    for (sx, ex) in [(cx - 17, GW / 2 - 6), (cx - 6, GW / 2 - 3), (cx + 5, GW / 2 + 2), (cx + 16, GW / 2 + 5)] {
         let (y0, y1) = (y + 1, top_row + 2);
         let n = (y1 - y0).max(0);
         for k in 0..n {

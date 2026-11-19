@@ -561,3 +561,110 @@ pub fn fingerprint(g: &Sprite) -> String {
     }
     s
 }
+
+// ---------------------------------------------------------------- species balls
+/// The pet curled into a ball, with its own identity: ears, tuft, antenna... spinning with it.
+pub fn build_species_ball(species: &str, colors: (Color, Color, Color), angle: f64, face: bool, squash: f64) -> Sprite {
+    let (body, shade, accent) = colors;
+    let out = col::OUT;
+    let mut g = if species == "bot" { build_ball((0xb8c4d0, 0x8a96a6, 0xff5a5a), angle, false, squash) } else { build_ball(colors, angle, face, squash) };
+    let (cx, r) = (16.0, 7.5);
+    let ry = r * (1.0 - squash);
+    let cy = (GH - 1) as f64 - ry;
+    let at = |a: f64, d: f64| -> Cell { ((cx + a.cos() * d).floor() as i32, (cy + a.sin() * d * (1.0 - squash)).floor() as i32) };
+    let up = angle - std::f64::consts::FRAC_PI_2; // "top of the head" while it spins
+    // add cells outside the ball, then outline them
+    let add = |g: &mut Sprite, cells: &[(Cell, Color)]| {
+        let mut new = vec![];
+        for &(p, c) in cells {
+            if p.1 < GH && !g.contains_key(&p) {
+                g.insert(p, c);
+                new.push(p);
+            }
+        }
+        for p in new {
+            for n in [(p.0 + 1, p.1), (p.0 - 1, p.1), (p.0, p.1 + 1), (p.0, p.1 - 1)] {
+                if n.1 < GH && !g.contains_key(&n) {
+                    g.insert(n, out);
+                }
+            }
+        }
+    };
+    let fill = |g: &mut Sprite, p: Cell, c: Color| {
+        if matches!(g.get(&p), Some(v) if *v != out) {
+            g.insert(p, c);
+        }
+    };
+    match species {
+        "kitty" => {
+            for side in [-0.55, 0.55] {
+                let a = up + side;
+                add(&mut g, &[(at(a, r + 0.6), body), (at(a, r + 1.6), shade)]);
+            }
+        }
+        "bunny" => {
+            for side in [-0.3, 0.3] {
+                let a = up + side;
+                add(&mut g, &[(at(a, r + 0.6), body), (at(a, r + 1.6), accent), (at(a, r + 2.6), accent), (at(a, r + 3.6), body)]);
+            }
+        }
+        "bear" => {
+            for side in [-0.8, 0.8] {
+                let p = at(up + side, r + 0.9);
+                add(&mut g, &[(p, shade), ((p.0 + 1, p.1), shade), ((p.0, p.1 + 1), shade), ((p.0 + 1, p.1 + 1), shade)]);
+            }
+        }
+        "pup" => {
+            for side in [-1.35f64, 1.35] {
+                let a = up + side;
+                add(&mut g, &[(at(a, r + 0.6), shade), (at(a + side.signum() * 0.25, r + 1.4), shade)]);
+            }
+        }
+        "chick" => {
+            add(&mut g, &[(at(up, r + 0.7), accent), (at(up - 0.25, r + 1.5), accent), (at(up + 0.25, r + 1.5), accent)]);
+        }
+        "bot" => {
+            // antenna with a light, a visor band with glowing eyes, rivets
+            add(&mut g, &[(at(up, r + 0.6), 0x8a96a6), (at(up, r + 1.6), 0x8a96a6), (at(up, r + 2.6), 0xffd23f)]);
+            for k in -2..=2 {
+                let a = angle + k as f64 * 0.28;
+                fill(&mut g, at(a, 4.6), 0x24304a);
+                fill(&mut g, at(a, 3.6), 0x24304a);
+            }
+            if face {
+                fill(&mut g, at(angle - 0.25, 4.2), 0x5ef0ff);
+                fill(&mut g, at(angle + 0.25, 4.2), 0x5ef0ff);
+            }
+            for k in 0..6 {
+                fill(&mut g, at(angle + std::f64::consts::PI + k as f64 * 0.5 - 1.25, 6.0), 0x6b7787);
+            }
+        }
+        _ => {
+            // blip: a little sprout
+            add(&mut g, &[(at(up, r + 0.6), 0x4caf50), (at(up + 0.3, r + 1.5), 0x7ad97f)]);
+        }
+    }
+    g
+}
+
+/// Parachute looks: (stripe A, stripe B, how often out of 100). The first is the usual one.
+pub const CHUTES: [(Color, Color, u32); 6] = [
+    (0xef5b6b, 0xfff4e6, 62), // classic red and cream
+    (0x4ba3ff, 0xffffff, 16), // sky
+    (0x7ad9b0, 0xff8fab, 9),  // mint and pink
+    (0xffd23f, 0x2b2340, 6),  // gold and night
+    (0x8a5cf6, 0x24164a, 4),  // galaxy (with stars)
+    (0xff4d6d, 0x4ba3ff, 3),  // rainbow
+];
+
+/// Pick a parachute look by rarity (`roll` in 0..100).
+pub fn chute_style(roll: u32) -> u8 {
+    let mut acc = 0;
+    for (i, c) in CHUTES.iter().enumerate() {
+        acc += c.2;
+        if roll < acc {
+            return i as u8;
+        }
+    }
+    0
+}

@@ -451,7 +451,7 @@ fn settings_ui(ui: &mut Ui, t: &Theme, app: &mut App, el: &ActiveEventLoop, s: &
     });
 }
 
-fn species_tiles(ui: &mut Ui, t: &Theme, app: &mut App) {
+fn species_tiles(ui: &mut Ui, t: &Theme, app: &mut App, locked: bool) {
     let pal = app.pet.palette();
     let pal = if sprites::PALETTES.contains(&pal.as_str()) { pal } else { "gold".into() };
     let cur = app.pet.species().to_string();
@@ -459,8 +459,11 @@ fn species_tiles(ui: &mut Ui, t: &Theme, app: &mut App) {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
         for (key, name) in SPECIES_NAMES {
-            let (rect, resp) = ui.allocate_exact_size(Vec2::new(100.0, 96.0), Sense::click());
             let sel = key == cur;
+            if locked && !sel {
+                continue;
+            }
+            let (rect, resp) = ui.allocate_exact_size(Vec2::new(100.0, 96.0), if locked { Sense::hover() } else { Sense::click() });
             ui.painter().rect_filled(rect, CornerRadius::same(10), c(if resp.hovered() { t.hover } else { t.surface }));
             ui.painter().rect_stroke(rect, CornerRadius::same(10), Stroke::new(if sel { 2.0 } else { 1.0 }, c(if sel { t.accent } else { t.line })), StrokeKind::Inside);
             let mood = if sel || resp.hovered() { "happy" } else { "normal" };
@@ -470,12 +473,19 @@ fn species_tiles(ui: &mut Ui, t: &Theme, app: &mut App) {
             gui::paint_sprite(ui, &g, rect.center().x - bw as f32 * p / 2.0, rect.min.y + 62.0 - bh as f32 * p, p);
             let font = egui::FontId::proportional(12.5);
             ui.painter().text(Pos2::new(rect.center().x, rect.max.y - 16.0), egui::Align2::CENTER_CENTER, name, font, if sel { c(t.ink) } else { c(t.muted) });
-            if resp.hovered() {
+            if resp.hovered() && !locked {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
-            if resp.clicked() {
+            if resp.clicked() && !locked {
                 pick = Some(key);
             }
+        }
+        if locked {
+            ui.vertical(|ui| {
+                ui.add_space(26.0);
+                ui.set_max_width(300.0);
+                gui::muted(ui, t, "This is who your pet is: the kind of pet stays for life. Colours can still change below.");
+            });
         }
     });
     if let Some(k) = pick {
@@ -574,7 +584,7 @@ fn page_pet(ui: &mut Ui, t: &Theme, app: &mut App, el: &ActiveEventLoop, s: &mut
         });
     });
     gui::section(ui, t, "Look");
-    species_tiles(ui, t, app);
+    species_tiles(ui, t, app, app.cfg.bool("named"));
     gui::section(ui, t, "Colour");
     swatches(ui, t, app);
     ui.add_space(4.0);
@@ -1330,7 +1340,7 @@ fn welcome_ui(ui: &mut Ui, t: &Theme, app: &mut App, s: &mut WelcomePage) -> boo
         }
     });
     gui::section(ui, t, "Pick your pet");
-    species_tiles(ui, t, app);
+    species_tiles(ui, t, app, false);
     ui.add_space(4.0);
     swatches(ui, t, app);
     ui.add_space(14.0);

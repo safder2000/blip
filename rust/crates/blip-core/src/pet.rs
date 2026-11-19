@@ -53,6 +53,7 @@ pub struct Pet {
     pub rng: Rng,
     pub events: Vec<Ev>,
     last_pat: f64,
+    last_toss: f64,
 }
 
 pub fn fresh_state(gen: i64, name: &str, now: f64) -> Map<String, Value> {
@@ -78,7 +79,7 @@ impl Pet {
             st.extend(saved);
             st.insert("stats".into(), Value::Object(stats));
         }
-        Pet { path, st, rng: Rng::new(), events: vec![], last_pat: 0.0 }
+        Pet { path, st, rng: Rng::new(), events: vec![], last_pat: 0.0, last_toss: 0.0 }
     }
 
     pub fn save(&self) {
@@ -587,6 +588,22 @@ impl Pet {
         if self.rng.f() < 0.35 {
             self.chirp("love", None, 2.0);
         }
+    }
+
+    /// Thrown (or flung into a ball): that's playing too. A few seconds apart count, so
+    /// throwing it around a bit fills the Fun bar, spamming doesn't max it out.
+    pub fn tossed(&mut self, ball: bool, now: f64) {
+        if !self.hatched() || self.gone() || self.asleep() {
+            return;
+        }
+        if now - self.last_toss > 3.0 {
+            self.add_stat("happy", if ball { 8.0 } else { 5.0 });
+            self.add_stat("energy", -1.0);
+            if self.rng.f() < 0.3 {
+                self.chirp("wow", None, 2.0);
+            }
+        }
+        self.last_toss = now;
     }
 
     /// Being picked up wakes it, and it's not pleased.

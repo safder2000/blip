@@ -45,6 +45,8 @@ struct MenuWin {
 struct PoopWin {
     win: Overlay,
     x: f64,
+    /// picked up at (app time): dissolves with a sparkle, then goes
+    gone_at: Option<f64>,
 }
 
 struct Tray {
@@ -374,6 +376,7 @@ impl App {
             self.next_sim = now + 1.0;
         }
         self.draw_pet(now);
+        self.poop_tick(now);
         self.menu_tick(now);
         let anchor = (
             self.body.ring_target.unwrap_or(self.body.x) + self.geo.w as f64 / 2.0,
@@ -435,7 +438,9 @@ impl App {
                             self.flush_events(el);
                         }
                     }
-                    Some(Gesture::Thrown { .. }) => {
+                    Some(Gesture::Thrown { ball }) => {
+                        self.pet.tossed(ball, blip_core::now());
+                        self.flush_events(el);
                         self.work = platform::work_area_at(mx, my).0;
                         if !self.alerts.is_empty() {
                             self.body.ring_target = None;
@@ -446,7 +451,24 @@ impl App {
             }
         }
         self.body.slow = self.pet.b("sick");
+        let before = self.body.action;
         self.body.step(&self.geo, &self.work, t);
+        if before != Action::Unfold && self.body.action == Action::Unfold {
+            crate::log(&format!("unfold burst for {}", self.pet.species()));
+            // each species pops out of its ball its own way
+            let burst: &[(&'static str, u32)] = match self.pet.species() {
+                "kitty" => &[("heart", 2)],
+                "bunny" => &[("spark", 4)],
+                "bear" => &[("heart", 1), ("spark", 2)],
+                "pup" => &[("note", 2)],
+                "chick" => &[("note", 3)],
+                "bot" => &[("spark", 6)],
+                _ => &[("spark", 3)],
+            };
+            for (k, n) in burst {
+                self.spawn(k, *n);
+            }
+        }
         if self.body.take_menu() {
             let (mx, my) = platform::cursor();
             self.open_menu(el, mx, my);
@@ -539,7 +561,12 @@ impl App {
                     self.pet.place_poop(px);
                     self.poop_window(el, px);
                 }
-                Ev::PoopsGone => self.poops.clear(),
+                Ev::PoopsGone => {
+                    let now = self.now();
+                    for p in self.poops.iter_mut() {
+                        p.gone_at.get_or_insert(now);
+                    }
+                }
                 Ev::Asleep(true) => self.body.set(Action::Sleep, 1e18, now),
                 Ev::Asleep(false) => self.body.set(Action::Idle, 0.0, now),
                 Ev::Left => {
@@ -647,7 +674,62 @@ impl App {
             if self.visible() {
                 w.present(&cv, x, y);
             }
-            self.poops.push(PoopWin { win: w, x: px });
+            self.poops.push(PoopWin { win: w, x: px, gone_at: None });
+        }
+    }
+
+    /// Poops being picked up: rise, dissolve and sparkle for half a second, then go.
+    fn poop_tick(&mut self, now: f64) {
+        const DUR: f64 = 0.55;
+        let p = self.geo.p;
+        let mut i = 0;
+        while i < self.poops.len() {
+            let Some(t0) = self.poops[i].gone_at else {
+                i += 1;
+                continue;
+            };
+            let t = (now - t0) / DUR;
+            if t >= 1.0 {
+                self.poops.remove(i);
+                continue;
+            }
+            let base = scene::poop(p);
+            let mut cv = blip_ui::Canvas::new(base.w, base.h);
+            let lift = (t * 2.0 * p as f64) as i32;
+            for (y, row) in blip_pet::sprites::POOP.iter().enumerate() {
+                for (x, ch) in row.chars().enumerate() {
+                    let c = match ch {
+                        'o' => blip_pet::sprites::col::OUT,
+                        'b' => blip_pet::sprites::col::POOP,
+                        _ => continue,
+                    };
+                    // each cell vanishes at its own moment
+                    let h = ((x * 37 + y * 61 + 11) % 97) as f64 / 97.0;
+                    if h < t * 1.3 {
+                        continue;
+                    }
+                    let (cx, cy) = (x as i32 * p, y as i32 * p - lift);
+                    cv.rect(cx, cy, cx + p, cy + p, c);
+                }
+            }
+            // sparkles at the corners, growing then fading
+            let k = if t < 0.5 { t * 2.0 } else { 2.0 - t * 2.0 };
+            let arm = ((k * 1.5).round() as i32).max(0);
+            for (sx, sy) in [(1, 1), (6, 0), (0, 4), (7, 3)] {
+                let (cx, cy) = (sx * p, sy * p);
+                cv.rect(cx, cy, cx + p, cy + p, 0xfff1a8);
+                for d in 1..=arm {
+                    for (dx, dy) in [(d, 0), (-d, 0), (0, d), (0, -d)] {
+                        let (x, y) = (cx + dx * p / 2, cy + dy * p / 2);
+                        cv.rect(x, y, x + (p / 2).max(1), y + (p / 2).max(1), 0xffffff);
+                    }
+                }
+            }
+            crate::shot::canvas_every("poop-vanish", &cv, 0.15);
+            let pw = &mut self.poops[i];
+            let (x, y) = (pw.win.x, pw.win.y);
+            pw.win.present(&cv, x, y);
+            i += 1;
         }
     }
 
@@ -924,9 +1006,14 @@ impl App {
         }
         if let Some(i) = self.poops.iter().position(|p| p.win.id() == id) {
             if let WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. } = event {
-                let p = self.poops.remove(i);
-                self.pet.clean_one(p.x);
-                self.flush_events(el);
+                if self.poops[i].gone_at.is_none() {
+                    let now = self.now();
+                    self.poops[i].gone_at = Some(now);
+                    let x = self.poops[i].x;
+                    self.pet.clean_one(x);
+                    self.play_sound("pop", false);
+                    self.flush_events(el);
+                }
             }
             return;
         }
@@ -1186,6 +1273,19 @@ impl App {
             if let Some((secs, cmd)) = rest.split_once(':') {
                 let t: f64 = secs.parse().unwrap_or(0.0);
                 self.timed.push((t, cmd.to_string()));
+            }
+            return;
+        }
+        if let Some(v) = what.strip_prefix("throw:") {
+            // "throw:vx:vy" (px per step), as if flung with the mouse
+            let mut it = v.split(':').filter_map(|x| x.parse::<f64>().ok());
+            let (vx, vy) = (it.next().unwrap_or(20.0), it.next().unwrap_or(-10.0));
+            let now = self.now();
+            self.body.y -= 120.0 * self.geo.s;
+            if let Gesture::Thrown { ball } = self.body.fling(vx * self.geo.s, vy * self.geo.s, &self.geo, now) {
+                self.pet.tossed(ball, blip_core::now());
+                crate::log(&format!("thrown ball={ball} fire={} fun={:.1}", self.body.fire, self.pet.stat("happy")));
+                self.flush_events(el);
             }
             return;
         }
