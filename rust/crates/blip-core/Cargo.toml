@@ -1,0 +1,11 @@
+[package]
+name = "blip-core"
+description = "Blip's model: settings, the pet's needs and care, timers, alarms, notes. Same files as the Python Blip."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+getrandom.workspace = true
