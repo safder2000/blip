@@ -20,7 +20,7 @@ jobs:
 
       - name: Rust tests (wire format matches Python byte for byte)
         working-directory: rust
-        run: cargo test --workspace
+        run: cargo test --workspace --exclude blip-app   # the pet app is Windows/Mac only (own job below)
 
       - name: Build the server
         working-directory: rust

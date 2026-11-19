@@ -5,11 +5,11 @@
 //! Not run on a real Mac yet: built and smoke-tested by CI only.
 
 use blip_pet::body::Rect;
-use core_foundation::base::TCFType;
 use core_graphics::base::{kCGBitmapByteOrder32Little, kCGImageAlphaPremultipliedFirst, kCGRenderingIntentDefault};
 use core_graphics::color_space::CGColorSpace;
 use core_graphics::data_provider::CGDataProvider;
 use core_graphics::image::CGImage;
+use foreign_types::ForeignType;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::msg_send;
@@ -63,7 +63,7 @@ impl Surface {
         unsafe {
             let layer: *mut AnyObject = msg_send![&*self.view, layer];
             if !layer.is_null() {
-                let contents = image.as_concrete_TypeRef() as *mut AnyObject;
+                let contents = image.as_ptr() as *mut AnyObject;
                 let _: () = msg_send![layer, setContents: contents];
                 let _: () = msg_send![layer, setContentsScale: self.scale];
             }
@@ -84,7 +84,7 @@ fn screens() -> Vec<(f64, Rect, f64)> {
     // (backing scale, visible frame in top-left physical coords, main screen height)
     let Some(mtm) = MainThreadMarker::new() else { return vec![] };
     let list = NSScreen::screens(mtm);
-    let main_h = list.firstObject().map(|s| s.frame().size.height).unwrap_or(900.0);
+    let main_h = unsafe { list.firstObject() }.map(|s| s.frame().size.height).unwrap_or(900.0);
     list.iter()
         .map(|s| {
             let scale = s.backingScaleFactor();

@@ -27,4 +27,4 @@ objc2-foundation = { version = "0.2.2", features = ["NSGeometry", "NSArray", "NS
 objc2-app-kit = { version = "0.2.2", features = ["NSResponder", "NSView", "NSWindow", "NSEvent", "NSScreen", "NSColor", "NSApplication", "NSRunningApplication"] }
 objc2-quartz-core = { version = "0.2.2", features = ["CALayer"] }
 core-graphics = "0.23"
-core-foundation = "0.9"
+foreign-types = "0.5"
