@@ -94,6 +94,14 @@ pub struct App {
     demo: Option<String>,
     /// windows the user asked for (Settings, Notes...), opened by the windows module
     pub want_window: Vec<String>,
+    /// test steps for the newest window (BLIP_DEMO "ui:click:x,y" ...)
+    pub ui_script: Vec<String>,
+    later: Vec<String>,
+    /// something changed that the open windows show: redraw them now
+    pub windows_dirty: bool,
+    pub startup_on: bool,
+    /// (kind, text) for Settings -> Updates: idle | checking | ok | new | installing | error
+    pub update_state: Option<(&'static str, String)>,
 }
 
 fn look_of(pet: &Pet) -> Look {
@@ -161,6 +169,11 @@ impl App {
             quit: false,
             demo: std::env::var("BLIP_DEMO").ok().or_else(|| std::env::var("BLIP_DEMO_MENU").ok().map(|_| "menu".into())),
             want_window: vec![],
+            ui_script: vec![],
+            later: vec![],
+            windows_dirty: false,
+            startup_on: platform::startup_enabled(),
+            update_state: None,
         };
         if app.pet.gone() {
             app.body.set(Action::Gone, 1e18, 0.0);
@@ -190,6 +203,90 @@ impl App {
         if self.pet.stage() == "egg" {
             self.board("A new egg!", 5.0);
         }
+        if !self.cfg.bool("named") {
+            self.want_window.push("welcome".into());
+        }
+        if self.cfg.bool("mac_dock") {
+            platform::show_in_dock(true);
+        }
+    }
+
+    // ------------------------------------------------ used by the windows
+    /// Where windows open: (pet centre x, pet top y, that screen's work area), physical pixels.
+    pub fn window_anchor(&self) -> (f64, f64, Rect) {
+        let (cx, top) = (self.body.x + self.geo.w as f64 / 2.0, self.body.y + self.geo.h as f64 * 0.3);
+        let (work, _) = platform::work_area_at(cx, top);
+        (cx, top, work)
+    }
+
+    pub fn look(&self) -> Look {
+        look_of(&self.pet)
+    }
+
+    pub fn volume(&self) -> f64 {
+        if self.cfg.v.contains_key("volume") {
+            self.cfg.f64("volume")
+        } else {
+            60.0
+        }
+    }
+
+    pub fn set_look(&mut self, species: Option<&str>, color: Option<&str>) {
+        self.pet.set("look_chosen", json!(true));
+        if let Some(s) = species {
+            self.pet.set("species", json!(s));
+        }
+        if let Some(c) = color {
+            self.pet.set("color", json!(c));
+        }
+        if let Some(t) = &self.tray {
+            let _ = t._icon.set_icon(Some(crate::tray_image(&look_of(&self.pet))));
+        }
+        self.save();
+        self.run_later("net:rescan");
+    }
+
+    /// A command to run on the next tick (when there is no event loop handle at hand).
+    pub fn run_later(&mut self, cmd: &str) {
+        self.later.push(cmd.to_string());
+    }
+
+    pub fn apply_theme(&mut self, name: &str) {
+        self.cfg.set("theme", json!(name));
+        self.cfg.set("theme_chosen", json!(true));
+        self.theme = theme::pick(name, platform::system_dark());
+        self.menu = None;
+        self.windows_dirty = true;
+    }
+
+    pub fn update_line(&self) -> (&'static str, String) {
+        if let Some((k, t)) = &self.update_state {
+            return (k, t.clone());
+        }
+        let last = self.cfg.f64("last_update_check");
+        if last > 0.0 && blip_core::now() - last < 2.0 * 86400.0 {
+            ("ok", format!("You're up to date  \u{b7}  checked {}", crate::windows::ago(last)))
+        } else {
+            ("idle", "Checks for updates every few hours".into())
+        }
+    }
+
+    pub fn start_timer(&mut self, secs: f64, label: &str) {
+        self.timers.add_timer(secs, label, blip_core::now());
+        self.board(&format!("Timer {}", clock::fmt_clock(secs, true)), 3.0);
+        self.play_sound("pop", false);
+    }
+
+    pub fn start_stopwatch(&mut self, label: &str) {
+        self.timers.add_stopwatch(label, blip_core::now());
+        self.board("Stopwatch on", 3.0);
+        self.play_sound("pop", false);
+    }
+
+    pub fn add_alarm(&mut self, hh: u32, mm: u32, days: &[u32], label: &str) {
+        self.timers.add_alarm(hh, mm, days, label, blip_core::now());
+        self.board(&format!("Alarm {hh:02}:{mm:02} {}", clock::describe_days(days)), 4.0);
+        self.play_sound("pop", false);
     }
 
     pub fn save(&mut self) {
@@ -220,7 +317,7 @@ impl App {
         scene::spawn(&mut self.parts, kind, n, self.top_row, &mut || rng.f());
     }
 
-    fn play_sound(&mut self, name: &str, looped: bool) {
+    pub fn play_sound(&mut self, name: &str, looped: bool) {
         let (on, vol) = (self.cfg.bool("sound"), self.cfg.f64("volume"));
         self.sound.play(name, looped, on, if self.cfg.v.contains_key("volume") { vol } else { 60.0 });
     }
@@ -274,6 +371,9 @@ impl App {
             self.run(el, &cmd);
         }
         self.tray_events(el);
+        for cmd in std::mem::take(&mut self.later) {
+            self.run(el, &cmd);
+        }
     }
 
     fn physics_step(&mut self, el: &ActiveEventLoop, t: f64) {
@@ -775,7 +875,6 @@ impl App {
             return;
         }
         if self.pet_win.as_ref().map(|w| w.id()) != Some(id) {
-            crate::windows::event(self, el, id, event);
             return;
         }
         match event {
@@ -871,14 +970,10 @@ impl App {
             }
             ["timer", secs, label] => {
                 let secs: f64 = secs.parse().unwrap_or(300.0);
-                self.timers.add_timer(secs, label, wall);
-                self.board(&format!("Timer {}", clock::fmt_clock(secs, true)), 3.0);
+                self.start_timer(secs, label);
                 self.chirp("happy", Some("hourglass"), 2.0);
             }
-            ["stopwatch"] => {
-                self.timers.add_stopwatch("", wall);
-                self.board("Stopwatch on", 3.0);
-            }
+            ["stopwatch"] => self.start_stopwatch(""),
             ["snooze", iid, mins] => {
                 let m: f64 = mins.parse().unwrap_or(5.0);
                 self.timers.snooze(iid, m, wall);
@@ -901,6 +996,7 @@ impl App {
                 let on = !self.cfg.bool("dnd");
                 self.cfg.set("dnd", json!(on));
                 self.board(if on { "Do not disturb" } else { "DND off" }, 3.0);
+                self.windows_dirty = true;
             }
             ["wander"] => {
                 self.body.wander = !self.body.wander;
@@ -995,6 +1091,16 @@ impl App {
 
     // ------------------------------------------------ testing without a mouse
     fn run_demo(&mut self, el: &ActiveEventLoop, what: &str) {
+        if what.contains(';') {
+            for w in what.split(';') {
+                self.run_demo(el, w.trim());
+            }
+            return;
+        }
+        if let Some(step) = what.strip_prefix("ui:") {
+            self.ui_script.push(step.to_string());
+            return;
+        }
         let (x, y) = (self.body.x + self.geo.w as f64 / 2.0, self.body.y + self.geo.h as f64 * 0.6);
         match what {
             "menu" | "timer-menu" => {

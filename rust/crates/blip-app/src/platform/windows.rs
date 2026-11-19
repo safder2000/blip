@@ -144,3 +144,63 @@ pub fn system_dark() -> bool {
 pub fn user_name() -> String {
     std::env::var("USERNAME").unwrap_or_default()
 }
+
+const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+const RUN_NAME: &str = "BlipPet"; // same entry the Python version used
+
+fn wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(Some(0)).collect()
+}
+
+/// "Start with Windows" is on.
+pub fn startup_enabled() -> bool {
+    use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_SZ};
+    let mut size = 0u32;
+    unsafe {
+        RegGetValueW(HKEY_CURRENT_USER, wide(RUN_KEY).as_ptr(), wide(RUN_NAME).as_ptr(), RRF_RT_REG_SZ, null_mut(), null_mut(), &mut size) == 0
+    }
+}
+
+pub fn set_startup(on: bool) {
+    use windows_sys::Win32::System::Registry::{
+        RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER, KEY_SET_VALUE, REG_SZ,
+    };
+    let mut key: HKEY = null_mut();
+    unsafe {
+        if RegOpenKeyExW(HKEY_CURRENT_USER, wide(RUN_KEY).as_ptr(), 0, KEY_SET_VALUE, &mut key) != 0 {
+            return;
+        }
+        if on {
+            let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default();
+            let val = wide(&format!("\"{exe}\""));
+            RegSetValueExW(key, wide(RUN_NAME).as_ptr(), 0, REG_SZ, val.as_ptr() as *const u8, (val.len() * 2) as u32);
+        } else {
+            RegDeleteValueW(key, wide(RUN_NAME).as_ptr());
+        }
+        RegCloseKey(key);
+    }
+}
+
+/// The signed-in person's display name ("Safder Ali"), or "".
+pub fn full_name() -> String {
+    use windows_sys::Win32::Security::Authentication::Identity::{GetUserNameExW, NameDisplay};
+    let mut size = 0u32;
+    unsafe {
+        GetUserNameExW(NameDisplay, null_mut(), &mut size);
+        if size == 0 {
+            return String::new();
+        }
+        let mut buf = vec![0u16; size as usize + 1];
+        if GetUserNameExW(NameDisplay, buf.as_mut_ptr(), &mut size) == 0 {
+            return String::new();
+        }
+        String::from_utf16_lossy(&buf[..size as usize]).trim().to_string()
+    }
+}
+
+pub fn open_path(path: &std::path::Path) {
+    let _ = std::process::Command::new("explorer").arg(path).spawn();
+}
+
+/// macOS only (the Dock icon); nothing to do on Windows.
+pub fn show_in_dock(_show: bool) {}

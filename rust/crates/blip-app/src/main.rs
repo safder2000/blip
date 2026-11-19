@@ -6,9 +6,12 @@
 
 mod app;
 mod cards;
+mod gui;
 mod office;
 mod overlay;
 mod platform;
+mod shot;
+mod soft;
 mod sound;
 mod windows;
 
@@ -23,6 +26,7 @@ use winit::window::WindowId;
 
 struct Runner {
     app: Option<app::App>,
+    wins: windows::Windows,
     started: bool,
 }
 
@@ -38,7 +42,10 @@ impl ApplicationHandler for Runner {
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
-        if let Some(a) = self.app.as_mut() {
+        let Some(a) = self.app.as_mut() else { return };
+        if self.wins.owns(id) {
+            self.wins.event(a, el, id, event);
+        } else {
             a.window_event(el, id, event);
         }
     }
@@ -49,7 +56,7 @@ impl ApplicationHandler for Runner {
             return;
         }
         a.tick(el);
-        windows::open_requested(a, el);
+        self.wins.tick(a, el);
         el.set_control_flow(ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(15)));
     }
 
@@ -62,6 +69,16 @@ impl ApplicationHandler for Runner {
 
 /// The tray / menu-bar icon: the pet, drawn small.
 pub fn tray_image(look: &Look) -> tray_icon::Icon {
+    let (rgba, size) = pet_rgba(look, 32);
+    tray_icon::Icon::from_rgba(rgba, size, size).expect("tray icon")
+}
+
+/// The pet as a window icon (RGBA, size).
+pub fn window_icon(a: &app::App) -> (Vec<u8>, u32) {
+    pet_rgba(&a.look(), 64)
+}
+
+fn pet_rgba(look: &Look, size: u32) -> (Vec<u8>, u32) {
     let g = sprites::build_pet(&sprites::PetLook {
         stage: sprites::Stage::Adult,
         palette: &look.palette,
@@ -72,7 +89,7 @@ pub fn tray_image(look: &Look) -> tray_icon::Icon {
         blink: false,
         species: &look.species,
     });
-    let size = 32i32;
+    let size = size as i32;
     let (bx, by, bw, bh) = blip_ui::sprite_bounds(&g);
     let cell = (size / bw.max(bh).max(1)).max(1);
     let (ox, oy) = ((size - bw * cell) / 2, (size - bh * cell) / 2);
@@ -88,7 +105,7 @@ pub fn tray_image(look: &Look) -> tray_icon::Icon {
             }
         }
     }
-    tray_icon::Icon::from_rgba(rgba, size as u32, size as u32).expect("tray icon")
+    (rgba, size as u32)
 }
 
 fn main() {
@@ -100,6 +117,6 @@ fn main() {
         builder.with_activation_policy(ActivationPolicy::Accessory); // no Dock icon
     }
     let event_loop = builder.build().expect("event loop");
-    let mut runner = Runner { app: None, started: false };
+    let mut runner = Runner { app: None, wins: windows::Windows::default(), started: false };
     event_loop.run_app(&mut runner).expect("run");
 }

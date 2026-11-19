@@ -145,3 +145,70 @@ pub fn system_dark() -> bool {
 pub fn user_name() -> String {
     std::env::var("USER").unwrap_or_default()
 }
+
+fn agent_path() -> std::path::PathBuf {
+    std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
+        .join("Library/LaunchAgents/com.safder2000.blip.plist")
+}
+
+/// The Blip.app this binary runs from, if any.
+pub fn app_bundle() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    exe.ancestors().find(|p| p.extension().map_or(false, |e| e == "app")).map(|p| p.to_path_buf())
+}
+
+/// "Open at login" is on.
+pub fn startup_enabled() -> bool {
+    agent_path().exists()
+}
+
+pub fn set_startup(on: bool) {
+    let path = agent_path();
+    if !on {
+        let _ = std::fs::remove_file(path);
+        return;
+    }
+    let args: Vec<String> = match app_bundle() {
+        Some(b) => vec!["/usr/bin/open".into(), b.display().to_string()],
+        None => vec![std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default()],
+    };
+    let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+    let items: String = args.iter().map(|a| format!("<string>{}</string>", esc(a))).collect();
+    let plist = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \
+         \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict>\
+         <key>Label</key><string>com.safder2000.blip</string><key>ProgramArguments</key><array>{items}</array>\
+         <key>RunAtLoad</key><true/></dict></plist>\n"
+    );
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(path, plist);
+}
+
+/// The signed-in person's display name, or "".
+pub fn full_name() -> String {
+    std::process::Command::new("id")
+        .arg("-F")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default()
+}
+
+pub fn open_path(path: &std::path::Path) {
+    let _ = std::process::Command::new("open").arg(path).spawn();
+}
+
+/// Show or hide Blip's Dock icon (and app menu) while running.
+pub fn show_in_dock(show: bool) {
+    unsafe {
+        let app: *mut AnyObject = msg_send![objc2::class!(NSApplication), sharedApplication];
+        if !app.is_null() {
+            let policy: isize = if show { 0 } else { 1 }; // Regular / Accessory
+            let _: bool = msg_send![app, setActivationPolicy: policy];
+            if show {
+                let _: () = msg_send![app, activateIgnoringOtherApps: true];
+            }
+        }
+    }
+}
