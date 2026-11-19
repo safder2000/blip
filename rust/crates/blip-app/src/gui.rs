@@ -29,6 +29,7 @@ pub struct GuiWin {
     pub closed: bool,
     dark: Option<bool>,
     shown: bool,
+    raise_until: Option<Instant>,
     buf: Vec<u32>,
     last_pos: Pos2,
 }
@@ -140,11 +141,9 @@ impl GuiWin {
             attrs = attrs.with_window_icon(Icon::from_rgba(rgba, n, n).ok());
         }
         let window = Arc::new(el.create_window(attrs).ok()?);
-        // place it (physical pixels) above the pet, kept on screen
+        // `at` is the top-left corner (physical pixels), already kept on screen by the caller
         let s = window.scale_factor();
-        let (w, h) = (size.0 * s, size.1 * s);
-        let _ = at;
-        window.set_outer_position(PhysicalPosition::new(at.0 - w / 2.0, at.1 - h));
+        window.set_outer_position(PhysicalPosition::new(at.0, at.1));
         let sb = softbuffer::Context::new(window.clone()).ok()?;
         let surface = softbuffer::Surface::new(&sb, window.clone()).ok()?;
         let ctx = egui::Context::default();
@@ -162,6 +161,7 @@ impl GuiWin {
             closed: false,
             dark: None,
             shown: false,
+            raise_until: None,
             buf: vec![],
             last_pos: Pos2::ZERO,
         })
@@ -171,9 +171,23 @@ impl GuiWin {
         self.window.id()
     }
 
-    pub fn focus(&self) {
+    /// Bring it in front of other apps. Asked again for a moment afterwards: when the request comes
+    /// from Blip's menu, the menu closing can hand the foreground back to the app below.
+    pub fn focus(&mut self) {
         self.window.set_minimized(false);
-        self.window.focus_window();
+        crate::platform::bring_to_front(&self.window);
+        self.raise_until = Some(Instant::now() + Duration::from_millis(500));
+    }
+
+    /// Called every tick: keeps bringing it forward until the raise window passes.
+    pub fn keep_raised(&mut self) {
+        if let Some(t) = self.raise_until {
+            if Instant::now() > t {
+                self.raise_until = None;
+            } else if !self.window.has_focus() {
+                crate::platform::bring_to_front(&self.window);
+            }
+        }
     }
 
     pub fn on_event(&mut self, ev: &WindowEvent) {
@@ -281,7 +295,7 @@ impl GuiWin {
         if !self.shown {
             self.shown = true;
             self.window.set_visible(true);
-            self.window.focus_window();
+            self.focus();
             self.next_paint = Some(Instant::now());
         }
     }
@@ -601,4 +615,61 @@ pub fn empty_state(ui: &mut Ui, t: &Theme, title: &str, text: &str) {
         ui.label(RichText::new(text).color(c(t.muted)).size(12.5));
     });
     ui.add_space(8.0);
+}
+
+const BAR_COLORS: [Color; 10] = [0x7ad9b0, 0x8cd5a0, 0xa6d08c, 0xc2ca78, 0xdcc36a, 0xf0b964, 0xf6a26c, 0xf68a7e, 0xf07592, 0xe868a6];
+
+fn pixel_rect(ui: &Ui, r: Rect, p: f32, col: Color32) {
+    // a box with notched pixel corners, like blip-ui's pixel_box
+    ui.painter().rect_filled(Rect::from_min_max(Pos2::new(r.min.x + p, r.min.y), Pos2::new(r.max.x - p, r.max.y)), 0.0, col);
+    ui.painter().rect_filled(Rect::from_min_max(Pos2::new(r.min.x, r.min.y + p), Pos2::new(r.max.x, r.max.y - p)), 0.0, col);
+}
+
+/// The pixel "signal bars" volume control from the Python app: 10 bars lighting up mint to pink.
+/// Click or drag to set; the speaker mutes / unmutes. Returns the new level (0-100) when it changed.
+pub fn volume_bars(ui: &mut Ui, t: &Theme, value: f64, last_on: f64, dim: bool) -> Option<f64> {
+    let p = px(ui, 2.0);
+    let (bw, gap, x0, h) = (12.0, 5.0, 34.0, 36.0);
+    let n = 10;
+    let w = x0 + n as f32 * (bw + gap) + 48.0;
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click_and_drag());
+    let lvl = (value / 10.0).round() as usize;
+    let ink = if dim { c(t.off) } else { c(t.ink) };
+    let sy = rect.center().y - 3.5 * p;
+    paint_glyph(ui, rect.min.x, sy, pixfont::icon("speaker"), p, ink);
+    if lvl == 0 {
+        ui.painter().text(Pos2::new(rect.min.x + 6.0 * p + 4.0, rect.center().y), egui::Align2::LEFT_CENTER, "x", FontId::proportional(13.0), c(t.danger));
+    } else {
+        for i in 0..(1 + lvl / 4).min(3) {
+            let x = rect.min.x + 6.0 * p + i as f32 * 2.0 * p;
+            let hh = (2.0 + 2.0 * i as f32) * p;
+            ui.painter().rect_filled(Rect::from_min_max(Pos2::new(x, rect.center().y - hh / 2.0), Pos2::new(x + p, rect.center().y + hh / 2.0)), 0.0, ink);
+        }
+    }
+    for i in 0..n {
+        let x = rect.min.x + x0 + i as f32 * (bw + gap);
+        let bh = 8.0 + (h - 10.0) * (i + 1) as f32 / n as f32;
+        let lit = i < lvl;
+        let col = if lit && !dim { c(BAR_COLORS[i]) } else if lit { c(t.track).gamma_multiply(1.6) } else { c(t.track) };
+        pixel_rect(ui, Rect::from_min_max(Pos2::new(x, rect.max.y - bh), Pos2::new(x + bw, rect.max.y)), p, col);
+    }
+    let pct = if lvl == 0 { "Mute".to_string() } else { format!("{}%", lvl * 10) };
+    ui.painter().text(Pos2::new(rect.max.x - 4.0, rect.center().y), egui::Align2::RIGHT_CENTER, pct, FontId::proportional(12.5), if dim { c(t.off) } else { c(t.muted) });
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    let pos = resp.interact_pointer_pos()?;
+    if !(resp.clicked() || resp.dragged() || resp.drag_started()) {
+        return None;
+    }
+    let rx = pos.x - rect.min.x;
+    let new = if rx < x0 - 4.0 {
+        if !resp.clicked() {
+            return None;
+        }
+        if lvl == 0 { last_on.max(10.0) } else { 0.0 }
+    } else {
+        (((rx - x0) / (bw + gap)).floor() as i64 + 1).clamp(0, n as i64) as f64 * 10.0
+    };
+    (new != (lvl * 10) as f64).then_some(new)
 }

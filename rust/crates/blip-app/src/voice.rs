@@ -21,8 +21,10 @@ use crate::cards::ShowCard;
 use crate::opus::{self, Decoder, Encoder, FRAME};
 
 const RATE: u32 = 16000;
-const PREBUFFER: usize = 3;
-const MAX_BUFFER: usize = 12;
+/// frames (20 ms each) collected before playback starts
+const PREBUFFER: usize = 2;
+/// above this the queue is trimmed back to PREBUFFER: delay never builds up past ~100 ms
+const MAX_BUFFER: usize = 5;
 const IDLE_TIMEOUT: f64 = 15.0;
 
 /// A mic and a speaker exist (checked once).
@@ -64,6 +66,8 @@ struct Shared {
     sock: Option<UdpSocket>,
     transport: Option<Box<dyn Fn(&[u8]) + Send + Sync>>,
     lost: AtomicBool,
+    /// their voice volume: 1.0 normal, up to 3.0 with the card's boost slider (f32 bits)
+    gain: std::sync::atomic::AtomicU32,
 }
 
 impl Shared {
@@ -133,8 +137,12 @@ impl Shared {
         rx.last_seq = seq;
         if pcm.len() == FRAME {
             rx.queue.push_back(pcm);
-            while rx.queue.len() > MAX_BUFFER {
-                rx.queue.pop_front();
+            if rx.queue.len() > MAX_BUFFER {
+                // the other side sends a bit faster than we play (or a burst came in): drop the
+                // oldest audio instead of letting the delay grow
+                while rx.queue.len() > PREBUFFER {
+                    rx.queue.pop_front();
+                }
             }
         }
         true
@@ -148,6 +156,11 @@ impl Shared {
         }
         if rx.playing {
             if let Some(f) = rx.queue.pop_front() {
+                let g = f32::from_bits(self.gain.load(Ordering::Relaxed));
+                if g > 1.01 {
+                    // louder, with a soft limit so a boosted voice doesn't crackle
+                    return f.iter().map(|&v| ((v as f32 / 32768.0 * g).tanh() * 32767.0) as i16).collect();
+                }
                 return f;
             }
             rx.playing = false; // ran dry: build the buffer up again
@@ -285,6 +298,7 @@ impl Session {
             sock,
             transport,
             lost: AtomicBool::new(false),
+            gain: std::sync::atomic::AtomicU32::new(1.0f32.to_bits()),
         });
         if let Some(sock) = sh.sock.as_ref().and_then(|s| s.try_clone().ok()) {
             let sh = sh.clone();
@@ -429,10 +443,19 @@ fn start(app: &mut App, el: &ActiveEventLoop, pid: &str, name: &str, cid: &str, 
     let keys = proto::session_keys(&gkey, cid, &unhex(nonce)?);
     let transport = if server { Some(net.voice_sender(pid)) } else { None };
     let sess = match Session::start(keys, role, peer, transport, codec) {
-        Ok(s) => s,
+        Ok(s) => {
+            if server {
+                // call audio from the server goes straight into the call, not via the app loop
+                let sh = s.sh.clone();
+                net.set_voice_sink(Some((pid.to_string(), Box::new(move |pkt: &[u8]| {
+                    sh.feed(pkt);
+                }))));
+            }
+            s
+        }
         Err(e) => {
             let body = format!("Couldn't start the call audio: {e}");
-            app.show_card(el, ShowCard { key: "", title: "Voice", body: &body, kind: "call", icon: Some("phone"), buttons: vec![("OK".into(), String::new())], timeout: Some(20.0), on_close: "" });
+            app.show_card(el, ShowCard { key: "", title: "Voice", body: &body, kind: "call", icon: Some("phone"), buttons: vec![("OK".into(), String::new())], timeout: Some(20.0), on_close: "", slider: None });
             return None;
         }
     };
@@ -460,6 +483,7 @@ fn start(app: &mut App, el: &ActiveEventLoop, pid: &str, name: &str, cid: &str, 
             buttons: vec![("Hang up".into(), "voice:hangup".into()), ("Mute".into(), "stay:voice:mute".into())],
             timeout: None,
             on_close: "voice:closed:{why}",
+            slider: Some(("Boost", 0, "voice:boost")),
         },
     );
     Some(port)
@@ -533,6 +557,9 @@ fn end(app: &mut App, notify: bool, why: Option<&str>) {
     };
     crate::log(&format!("voice end why={why:?} received={got} heard_frames={heard}"));
     c.sess.stop();
+    if let Some(n) = &app.office.net {
+        n.set_voice_sink(None);
+    }
     if notify {
         crate::office::send(app, &c.peer, "voice_end", json!({"call_id": c.cid}));
     }
@@ -544,6 +571,12 @@ fn end(app: &mut App, notify: bool, why: Option<&str>) {
 pub fn run(app: &mut App, _el: &ActiveEventLoop, cmd: &str) {
     match cmd {
         "voice:hangup" | "voice:closed:x" => end(app, true, None),
+        _ if cmd.starts_with("voice:boost:") => {
+            let level: f32 = cmd["voice:boost:".len()..].parse().unwrap_or(0.0);
+            if let Some(c) = &app.voice.call {
+                c.sess.sh.gain.store((1.0 + 0.25 * level.clamp(0.0, 8.0)).to_bits(), Ordering::Relaxed);
+            }
+        }
         "voice:mute" => {
             if let Some(c) = &mut app.voice.call {
                 let m = !c.sess.sh.muted.load(Ordering::SeqCst);

@@ -370,7 +370,7 @@ pub fn tick(app: &mut App, el: &ActiveEventLoop) {
                     Err(e) => (e, false),
                 };
                 let buttons = if ok { vec![("Show my tasks".to_string(), "window:tasks".to_string()), ("OK".into(), String::new())] } else { vec![("OK".into(), String::new())] };
-                app.show_card(el, ShowCard { key: "bc-connect", title: "Basecamp", body: &msg, kind: "task", icon: Some("task"), buttons, timeout: Some(30.0), on_close: "" });
+                app.show_card(el, ShowCard { key: "bc-connect", title: "Basecamp", body: &msg, kind: "task", icon: Some("task"), buttons, timeout: Some(30.0), on_close: "", slider: None });
                 app.windows_dirty = true;
             }
             Event::Completed(id, r) => {
@@ -444,7 +444,7 @@ fn card(app: &mut App, el: &ActiveEventLoop, items: &[Task], summary: bool) {
     }
     let body = format!("{}:\n{}", head.join(", "), lines.join("\n"));
     let buttons = vec![("Show all".to_string(), "window:tasks".to_string()), ("Snooze 1h".into(), "bc:snooze".into()), ("OK".into(), String::new())];
-    app.show_card(el, ShowCard { key: "bc", title: if summary { "Your Basecamp day" } else { "Basecamp" }, body: &body, kind: "task", icon: Some("task"), buttons, timeout: None, on_close: "" });
+    app.show_card(el, ShowCard { key: "bc", title: if summary { "Your Basecamp day" } else { "Basecamp" }, body: &body, kind: "task", icon: Some("task"), buttons, timeout: None, on_close: "", slider: None });
 }
 
 // ------------------------------------------------ windows

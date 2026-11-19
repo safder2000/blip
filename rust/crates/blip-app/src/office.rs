@@ -261,7 +261,7 @@ pub fn menu_items(app: &App) -> Vec<Item> {
 // ------------------------------------------------ commands
 fn card(app: &mut App, el: &ActiveEventLoop, key: &str, title: &str, body: &str, buttons: Vec<(&str, String)>, timeout: Option<f64>, on_close: &str, icon: &'static str, kind: &str) {
     let buttons = buttons.into_iter().map(|(a, b)| (a.to_string(), b)).collect();
-    app.show_card(el, ShowCard { key, title, body, kind, icon: Some(icon), buttons, timeout, on_close });
+    app.show_card(el, ShowCard { key, title, body, kind, icon: Some(icon), buttons, timeout, on_close, slider: None });
 }
 
 fn cheer(app: &mut App) {

@@ -72,7 +72,11 @@ struct Shared {
     /// (state, detail): off | connecting | connected | error
     server: Mutex<(String, String)>,
     to_server: Mutex<Option<tokio::sync::mpsc::UnboundedSender<String>>>,
+    /// the call in progress through the server: (peer, feed) - audio goes straight to it
+    voice_sink: Mutex<Option<VoiceSink>>,
 }
+
+type VoiceSink = (String, Box<dyn Fn(&[u8]) + Send + Sync>);
 
 pub struct Net {
     sh: Arc<Shared>,
@@ -180,6 +184,7 @@ impl Net {
             events: tx,
             server: Mutex::new(("off".into(), String::new())),
             to_server: Mutex::new(None),
+            voice_sink: Mutex::new(None),
         });
         {
             let sh = sh.clone();
@@ -270,6 +275,11 @@ impl Net {
         if let Some(tx) = sh.to_server.lock().unwrap().as_ref() {
             let _ = tx.send(m.to_string());
         }
+    }
+
+    /// Where call audio from the server goes (None when no call).
+    pub fn set_voice_sink(&self, sink: Option<VoiceSink>) {
+        *self.sh.voice_sink.lock().unwrap() = sink;
     }
 
     /// Something that sends call audio to `pid` through the server, from any thread.
@@ -565,7 +575,13 @@ fn server_message(sh: &Shared, d: Map<String, Value>) {
     let src = s(d.get("from"));
     if let Some(v) = d.get("v").and_then(Value::as_str) {
         if let Ok(pkt) = base64::engine::general_purpose::STANDARD.decode(v) {
-            let _ = sh.events.send(NetEvent::Voice(src, pkt));
+            let sink = sh.voice_sink.lock().unwrap();
+            match sink.as_ref() {
+                Some((peer, feed)) if *peer == src => feed(&pkt),
+                _ => {
+                    let _ = sh.events.send(NetEvent::Voice(src, pkt));
+                }
+            }
         }
         return;
     }

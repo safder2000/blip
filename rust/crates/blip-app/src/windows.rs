@@ -218,6 +218,7 @@ impl Windows {
         }
         let t = app.theme;
         for o in self.open.iter_mut() {
+            o.win.keep_raised();
             if !o.win.due(now) {
                 continue;
             }
@@ -310,6 +311,8 @@ impl Windows {
         };
         let (ax, ay, work) = app.window_anchor();
         let s = work_scale(app);
+        // never taller or wider than the screen it opens on (title bar included)
+        let size: (f64, f64) = (f64::min(size.0, (work.right - work.left) / s - 20.0), f64::min(size.1, (work.bottom - work.top) / s - 32.0 - 20.0));
         let (w, h) = (size.0 * s, size.1 * s + 32.0 * s);
         let x = (ax - w / 2.0).clamp(work.left + 10.0, (work.right - w - 10.0).max(work.left + 10.0));
         let y = (ay - h - 10.0).min(work.bottom - h - 10.0).max(work.top + 10.0);
@@ -645,21 +648,15 @@ fn page_general(ui: &mut Ui, t: &Theme, app: &mut App, el: &ActiveEventLoop, s: 
             }
         }
         ui.add_space(6.0);
-        ui.add_enabled_ui(on, |ui| {
-            ui.horizontal(|ui| {
-                gui::icon(ui, "speaker", gui::px(ui, 1.6), c(t.muted));
-                let mut v = app.volume() as f32;
-                ui.spacing_mut().slider_width = 260.0;
-                let r = ui.add(egui::Slider::new(&mut v, 0.0..=100.0).show_value(false));
-                if r.changed() {
-                    app.cfg.set("volume", json!(v.round() as i64));
-                }
-                if r.drag_stopped() || (r.clicked() && !r.dragged()) {
-                    app.sound.preview(v as f64);
-                }
-                gui::muted(ui, t, &format!("{}%", v.round()));
-            });
-        });
+        // always adjustable, always audible: the sample plays at each new level
+        let last_on = if app.cfg.f64("volume_last") > 0.0 { app.cfg.f64("volume_last") } else { 60.0 };
+        if let Some(v) = gui::volume_bars(ui, t, app.volume(), last_on, !on) {
+            app.cfg.set("volume", json!(v as i64));
+            if v > 0.0 {
+                app.cfg.set("volume_last", json!(v as i64));
+            }
+            app.sound.preview(v);
+        }
         gui::hline(ui, t);
         let mut start = app.startup_on;
         let title = if cfg!(target_os = "macos") { "Open at login" } else { "Start with Windows" };

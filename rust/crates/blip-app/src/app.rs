@@ -555,6 +555,7 @@ impl App {
                         buttons: vec![("New egg".into(), "new-egg".into()), ("OK".into(), String::new())],
                         timeout: None,
                         on_close: "",
+                        slider: None,
                     });
                 }
                 Ev::Hatched => self.body.set(Action::Idle, 2.0, now),
@@ -721,7 +722,7 @@ impl App {
         };
         self.start_alert(&key, "alarm", false);
         let close = format!("stop-alert:{key}");
-        self.show_card(el, ShowCard { key: &key, title, body: &body, kind, icon: Some(icon), buttons, timeout: Some(180.0), on_close: &close });
+        self.show_card(el, ShowCard { key: &key, title, body: &body, kind, icon: Some(icon), buttons, timeout: Some(180.0), on_close: &close, slider: None });
     }
 
     fn reminder_fired(&mut self, el: &ActiveEventLoop, n: &notes::Note) {
@@ -743,6 +744,7 @@ impl App {
             ],
             timeout: Some(300.0),
             on_close: &close,
+            slider: None,
         });
     }
 

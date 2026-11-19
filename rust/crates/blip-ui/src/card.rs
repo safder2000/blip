@@ -26,6 +26,19 @@ pub enum CardHit {
     Close,
     Header,
     Button(usize),
+    /// the slider row, at this level (0..=SLIDER_STEPS)
+    Slider(usize),
+}
+
+/// Steps of the card slider (the voice boost: 1x .. 3x).
+pub const SLIDER_STEPS: usize = 8;
+
+#[derive(Clone, Debug)]
+pub struct Slider {
+    pub label: String,
+    pub level: usize,
+    /// run as "<cmd>:<level>" when it changes
+    pub cmd: String,
 }
 
 pub struct Card {
@@ -46,12 +59,19 @@ pub struct Card {
     rects: Vec<(i32, i32, i32, i32)>,
     pub hover: Option<CardHit>,
     s: f64,
+    pub slider: Option<Slider>,
+    slider_rect: (i32, i32, i32, i32),
 }
 
 const BODY: f32 = 13.3;
 
 impl Card {
     pub fn new(title: &str, body: &str, kind: &str, icon: Option<&'static str>, buttons: Vec<(String, String)>, scale: f64, fonts: &mut Fonts) -> Card {
+        Card::with_slider(title, body, kind, icon, buttons, None, scale, fonts)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_slider(title: &str, body: &str, kind: &str, icon: Option<&'static str>, buttons: Vec<(String, String)>, slider: Option<Slider>, scale: f64, fonts: &mut Fonts) -> Card {
         let s = scale.max(1.0);
         let p = 2.max((2.0 * s).round() as i32);
         let w = (300.0 * s).round() as i32;
@@ -64,6 +84,11 @@ impl Card {
         let body_y = y;
         if !lines.is_empty() {
             y += lines.len() as i32 * line_h + pad;
+        }
+        let mut slider_rect = (0, 0, 0, 0);
+        if slider.is_some() {
+            slider_rect = (2 * p + pad, y, w - 2 * p - pad, y + 10 * p);
+            y += 10 * p + pad;
         }
         // buttons right-aligned, wrapping onto more rows if needed
         let bh = 7 * p + 8 * p;
@@ -111,6 +136,8 @@ impl Card {
             rects,
             hover: None,
             s,
+            slider,
+            slider_rect,
         }
     }
 
@@ -128,7 +155,26 @@ impl Card {
         if y < self.p + self.head_h && y >= 0 {
             return Some(CardHit::Header);
         }
+        if self.slider.is_some() && inside(self.slider_rect) {
+            return self.slider_level_at(x).map(CardHit::Slider);
+        }
         self.rects.iter().position(|r| inside(*r)).map(CardHit::Button)
+    }
+
+    /// Where the bars start, and each bar's width and gap.
+    fn bars(&self) -> (i32, i32, i32) {
+        let p = self.p;
+        let label_w = self.slider.as_ref().map_or(0, |s| pixfont::text_width(&s.label.to_uppercase(), p));
+        (self.slider_rect.0 + label_w + 4 * p, 4 * p, 2 * p)
+    }
+
+    /// The level for a point on the slider row (None left of the bars).
+    pub fn slider_level_at(&self, x: i32) -> Option<usize> {
+        let (x0, bw, gap) = self.bars();
+        if x < x0 - 3 * self.p {
+            return None;
+        }
+        Some((((x - x0) / (bw + gap)) + 1).clamp(0, SLIDER_STEPS as i32) as usize).map(|l| if x < x0 { 0 } else { l })
     }
 
     pub fn draw(&self, cv: &mut Canvas, t: &Theme, fonts: &mut Fonts) {
@@ -160,6 +206,23 @@ impl Card {
         for (i, line) in self.lines.iter().enumerate() {
             let cy = self.body_y + i as i32 * self.line_h + self.line_h / 2;
             fonts.draw(cv, 2 * p + self.pad, cy, line, size, false, t.paper_ink);
+        }
+        if let Some(sl) = &self.slider {
+            let (sx, sy, _, sy1) = self.slider_rect;
+            let mid = (sy + sy1) / 2;
+            cv.pixel_text(sx, mid - 7 * p / 2, &sl.label.to_uppercase(), p, t.paper_ink);
+            let (x0, bw, gap) = self.bars();
+            const COLS: [Color; 8] = [0x7ad9b0, 0x9ad396, 0xc2ca78, 0xe6be66, 0xf6a26c, 0xf68a7e, 0xf07592, 0xe868a6];
+            for i in 0..SLIDER_STEPS {
+                let bx = x0 + i as i32 * (bw + gap);
+                let bh = 3 * p + (sy1 - sy - 3 * p) * (i as i32 + 1) / SLIDER_STEPS as i32;
+                let lit = i < sl.level;
+                let fill = if lit { COLS[i] } else if t.dark { 0x3a3a3a } else { 0xd8d2e6 };
+                cv.pixel_box(bx, sy1 - bh, bx + bw, sy1, p, fill);
+            }
+            let tag = format!("{}%", 100 + sl.level * 25);
+            let tx = x0 + SLIDER_STEPS as i32 * (bw + gap) + 2 * p;
+            cv.pixel_text(tx, mid - 7 * p / 2, &tag, p, t.paper_ink);
         }
         for (i, (label, _)) in self.buttons.iter().enumerate() {
             let (x0, y0, x1, y1) = self.rects[i];

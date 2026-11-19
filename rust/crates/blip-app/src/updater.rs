@@ -190,7 +190,7 @@ fn install(app: &mut App, rel: Release) {
 
 fn card(app: &mut App, el: &ActiveEventLoop, title: &str, body: &str, buttons: Vec<(&str, &str)>, timeout: Option<f64>, key: &str) {
     let buttons = buttons.into_iter().map(|(a, b)| (a.to_string(), b.to_string())).collect();
-    app.show_card(el, ShowCard { key, title, body, kind: "update", icon: Some("task"), buttons, timeout, on_close: "" });
+    app.show_card(el, ShowCard { key, title, body, kind: "update", icon: Some("task"), buttons, timeout, on_close: "", slider: None });
 }
 
 pub fn run(app: &mut App, el: &ActiveEventLoop, cmd: &str) -> bool {

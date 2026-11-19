@@ -262,3 +262,34 @@ pub fn single_instance(name: &str) -> bool {
         h.is_null() || err != ERROR_ALREADY_EXISTS
     }
 }
+
+/// Put a window in front of other apps and give it the keyboard. Windows refuses a plain
+/// SetForegroundWindow from a background app, so: restore it, lift it above everything for a
+/// moment, then ask for the foreground while attached to the foreground thread's input.
+pub fn bring_to_front(window: &winit::window::Window) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows_sys::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, SetForegroundWindow, HWND_NOTOPMOST,
+        HWND_TOPMOST, SWP_NOMOVE, SWP_SHOWWINDOW, SW_RESTORE,
+    };
+    let Ok(h) = window.window_handle() else { return };
+    let RawWindowHandle::Win32(h) = h.as_raw() else { return };
+    let hwnd = h.hwnd.get() as HWND;
+    unsafe {
+        if IsIconic(hwnd) != 0 {
+            ShowWindow(hwnd, SW_RESTORE);
+        }
+        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+        SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+        let fg = GetForegroundWindow();
+        let fg_thread = GetWindowThreadProcessId(fg, null_mut());
+        let me = GetCurrentThreadId();
+        let attached = fg_thread != 0 && fg_thread != me && AttachThreadInput(me, fg_thread, 1) != 0;
+        BringWindowToTop(hwnd);
+        SetForegroundWindow(hwnd);
+        if attached {
+            AttachThreadInput(me, fg_thread, 0);
+        }
+    }
+}

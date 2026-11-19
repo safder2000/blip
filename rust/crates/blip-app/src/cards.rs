@@ -1,7 +1,7 @@
 //! The stack of pop-up cards above the pet (`CardStack` in `blip/ui.py`). Each card is its own
 //! borderless window; buttons, the close X and timeouts turn into command strings for the app.
 
-use blip_ui::card::{Card, CardHit};
+use blip_ui::card::{Card, CardHit, Slider};
 use blip_ui::text::Fonts;
 use blip_ui::theme::Theme;
 use blip_ui::Canvas;
@@ -22,6 +22,7 @@ pub struct CardWin {
     dragged: bool,
     drag_from: Option<(f64, f64, i32, i32)>,
     dirty: bool,
+    sliding: bool,
 }
 
 pub struct ShowCard<'a> {
@@ -34,6 +35,8 @@ pub struct ShowCard<'a> {
     pub timeout: Option<f64>,
     /// run when the card goes away by X or timeout ("" for nothing)
     pub on_close: &'a str,
+    /// optional slider row: (label, level, command)
+    pub slider: Option<(&'a str, usize, &'a str)>,
 }
 
 #[derive(Default)]
@@ -51,7 +54,8 @@ impl CardStack {
         if !c.key.is_empty() {
             self.cards.retain(|w| w.key != c.key);
         }
-        let card = Card::new(c.title, c.body, c.kind, c.icon, c.buttons, scale, fonts);
+        let slider = c.slider.map(|(label, level, cmd)| Slider { label: label.into(), level, cmd: cmd.into() });
+        let card = Card::with_slider(c.title, c.body, c.kind, c.icon, c.buttons, slider, scale, fonts);
         let Some(mut win) = Overlay::new(el, card.w, card.h, 0, 0, false) else { return };
         win.set_no_activate(true);
         let canvas = Canvas::new(card.w, card.h);
@@ -66,6 +70,7 @@ impl CardStack {
             dragged: false,
             drag_from: None,
             dirty: true,
+            sliding: false,
         });
     }
 
@@ -128,6 +133,17 @@ impl CardStack {
                     c.card.hover = hit;
                     c.dirty = true;
                 }
+                if c.sliding {
+                    if let Some(l) = c.card.slider_level_at(position.x as i32) {
+                        if let Some(sl) = c.card.slider.as_mut() {
+                            if sl.level != l {
+                                sl.level = l;
+                                c.dirty = true;
+                                out.push(CardOut::Run(format!("{}:{l}", sl.cmd)));
+                            }
+                        }
+                    }
+                }
                 if let Some((sx, sy, wx, wy)) = c.drag_from {
                     let (mx, my) = platform::cursor();
                     let (nx, ny) = (wx + (mx - sx) as i32, wy + (my - sy) as i32);
@@ -148,9 +164,20 @@ impl CardStack {
                     let (mx, my) = platform::cursor();
                     c.drag_from = Some((mx, my, c.win.x, c.win.y));
                 }
+                if let Some(CardHit::Slider(l)) = c.card.hover {
+                    c.sliding = true;
+                    if let Some(sl) = c.card.slider.as_mut() {
+                        sl.level = l;
+                        c.dirty = true;
+                        out.push(CardOut::Run(format!("{}:{l}", sl.cmd)));
+                    }
+                }
             }
             WindowEvent::MouseInput { state: ElementState::Released, button: MouseButton::Left, .. } => {
                 c.drag_from = None;
+                if std::mem::take(&mut c.sliding) {
+                    return out;
+                }
                 match c.card.hover {
                     Some(CardHit::Close) => {
                         let cmd = c.close_cmd.clone();
@@ -189,7 +216,8 @@ impl CardStack {
             if c.card.body != body {
                 let buttons = c.card.buttons.clone();
                 let hover = c.card.hover;
-                c.card = Card::new(&c.card.title.clone(), body, &c.card.kind.clone(), c.card.icon, buttons, scale, fonts);
+                let slider = c.card.slider.clone();
+                c.card = Card::with_slider(&c.card.title.clone(), body, &c.card.kind.clone(), c.card.icon, buttons, slider, scale, fonts);
                 c.card.hover = hover;
                 c.canvas = Canvas::new(c.card.w, c.card.h);
                 c.card.draw(&mut c.canvas, theme, fonts);

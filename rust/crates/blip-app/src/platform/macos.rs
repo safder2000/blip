@@ -235,3 +235,14 @@ pub fn single_instance(name: &str) -> bool {
     let _ = LOCK.set(f);
     true
 }
+
+/// Put a window in front of other apps (an accessory app has to activate itself first).
+pub fn bring_to_front(window: &winit::window::Window) {
+    unsafe {
+        let app: *mut AnyObject = msg_send![objc2::class!(NSApplication), sharedApplication];
+        if !app.is_null() {
+            let _: () = msg_send![app, activateIgnoringOtherApps: true];
+        }
+    }
+    window.focus_window();
+}
