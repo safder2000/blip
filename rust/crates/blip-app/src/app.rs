@@ -206,6 +206,7 @@ impl App {
     pub fn start(&mut self, el: &ActiveEventLoop) {
         let (x, y) = (self.body.x as i32, self.body.y as i32);
         self.pet_win = Overlay::new(el, self.geo.w, self.geo.h, x, y, true);
+        crate::log(&format!("start: pet window at {x},{y} size {}x{} scale {} work {:?}", self.geo.w, self.geo.h, self.geo.s, self.work));
         let poops = self.pet.poops();
         for px in poops {
             self.poop_window(el, px);
@@ -856,6 +857,7 @@ impl App {
     }
 
     pub fn open_menu(&mut self, el: &ActiveEventLoop, at_x: f64, at_y: f64) {
+        crate::log(&format!("menu opens at {at_x},{at_y}"));
         self.open_menu_kind(el, at_x, at_y, "main");
     }
 
