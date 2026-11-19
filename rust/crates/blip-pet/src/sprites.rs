@@ -563,9 +563,10 @@ pub fn fingerprint(g: &Sprite) -> String {
 }
 
 // ---------------------------------------------------------------- species balls
-/// The pet curled into a ball, with its own identity: ears, tuft, antenna... spinning with it.
+/// The pet curled into a ball. The outline stays perfectly round (it should bounce like a
+/// basketball); each species shows who it is only in the markings on the ball, which spin with it.
 pub fn build_species_ball(species: &str, colors: (Color, Color, Color), angle: f64, face: bool, squash: f64) -> Sprite {
-    let (body, shade, accent) = colors;
+    let (_body, shade, accent) = colors;
     let out = col::OUT;
     let mut g = if species == "bot" { build_ball((0xb8c4d0, 0x8a96a6, 0xff5a5a), angle, false, squash) } else { build_ball(colors, angle, face, squash) };
     let (cx, r) = (16.0, 7.5);
@@ -573,23 +574,7 @@ pub fn build_species_ball(species: &str, colors: (Color, Color, Color), angle: f
     let cy = (GH - 1) as f64 - ry;
     let at = |a: f64, d: f64| -> Cell { ((cx + a.cos() * d).floor() as i32, (cy + a.sin() * d * (1.0 - squash)).floor() as i32) };
     let up = angle - std::f64::consts::FRAC_PI_2; // "top of the head" while it spins
-    // add cells outside the ball, then outline them
-    let add = |g: &mut Sprite, cells: &[(Cell, Color)]| {
-        let mut new = vec![];
-        for &(p, c) in cells {
-            if p.1 < GH && !g.contains_key(&p) {
-                g.insert(p, c);
-                new.push(p);
-            }
-        }
-        for p in new {
-            for n in [(p.0 + 1, p.1), (p.0 - 1, p.1), (p.0, p.1 + 1), (p.0, p.1 - 1)] {
-                if n.1 < GH && !g.contains_key(&n) {
-                    g.insert(n, out);
-                }
-            }
-        }
-    };
+    // only ever paint inside the ball, never past its outline
     let fill = |g: &mut Sprite, p: Cell, c: Color| {
         if matches!(g.get(&p), Some(v) if *v != out) {
             g.insert(p, c);
@@ -597,35 +582,58 @@ pub fn build_species_ball(species: &str, colors: (Color, Color, Color), angle: f
     };
     match species {
         "kitty" => {
+            // little ear patches near the rim and tabby stripes on the back
             for side in [-0.55, 0.55] {
-                let a = up + side;
-                add(&mut g, &[(at(a, r + 0.6), body), (at(a, r + 1.6), shade)]);
+                fill(&mut g, at(up + side, 5.8), shade);
+                fill(&mut g, at(up + side, 4.9), accent);
+            }
+            for k in [-0.35, 0.0, 0.35] {
+                let a = angle + std::f64::consts::PI + k;
+                fill(&mut g, at(a, 3.2), shade);
+                fill(&mut g, at(a, 4.2), shade);
             }
         }
         "bunny" => {
-            for side in [-0.3, 0.3] {
-                let a = up + side;
-                add(&mut g, &[(at(a, r + 0.6), body), (at(a, r + 1.6), accent), (at(a, r + 2.6), accent), (at(a, r + 3.6), body)]);
+            // long ears folded flat along the ball
+            for side in [-1.0, 1.0] {
+                for k in 0..4 {
+                    let a = up + side * (0.25 + 0.3 * k as f64);
+                    fill(&mut g, at(a, 5.6), accent);
+                }
             }
         }
         "bear" => {
+            // round ear spots and a muzzle patch
             for side in [-0.8, 0.8] {
-                let p = at(up + side, r + 0.9);
-                add(&mut g, &[(p, shade), ((p.0 + 1, p.1), shade), ((p.0, p.1 + 1), shade), ((p.0 + 1, p.1 + 1), shade)]);
+                let p = at(up + side, 5.4);
+                for q in [p, (p.0 + 1, p.1), (p.0, p.1 + 1), (p.0 + 1, p.1 + 1)] {
+                    fill(&mut g, q, shade);
+                }
+            }
+            if face {
+                fill(&mut g, at(angle, 2.6), accent);
             }
         }
         "pup" => {
-            for side in [-1.35f64, 1.35] {
-                let a = up + side;
-                add(&mut g, &[(at(a, r + 0.6), shade), (at(a + side.signum() * 0.25, r + 1.4), shade)]);
+            // floppy ear patches on both sides
+            for side in [-1.4, 1.4] {
+                for d in [4.6, 5.6] {
+                    fill(&mut g, at(up + side, d), shade);
+                    fill(&mut g, at(up + side * 0.85, d), shade);
+                }
             }
         }
         "chick" => {
-            add(&mut g, &[(at(up, r + 0.7), accent), (at(up - 0.25, r + 1.5), accent), (at(up + 0.25, r + 1.5), accent)]);
+            // a tuft painted at the top and a wing curve
+            for (da, d) in [(0.0, 5.8), (-0.25, 5.4), (0.25, 5.4)] {
+                fill(&mut g, at(up + da, d), accent);
+            }
+            for k in 0..3 {
+                fill(&mut g, at(angle + std::f64::consts::PI + 0.3 * k as f64 - 0.3, 4.4), shade);
+            }
         }
         "bot" => {
-            // antenna with a light, a visor band with glowing eyes, rivets
-            add(&mut g, &[(at(up, r + 0.6), 0x8a96a6), (at(up, r + 1.6), 0x8a96a6), (at(up, r + 2.6), 0xffd23f)]);
+            // a visor band with glowing eyes, a ring of rivets, a little light where the antenna folds in
             for k in -2..=2 {
                 let a = angle + k as f64 * 0.28;
                 fill(&mut g, at(a, 4.6), 0x24304a);
@@ -638,10 +646,12 @@ pub fn build_species_ball(species: &str, colors: (Color, Color, Color), angle: f
             for k in 0..6 {
                 fill(&mut g, at(angle + std::f64::consts::PI + k as f64 * 0.5 - 1.25, 6.0), 0x6b7787);
             }
+            fill(&mut g, at(up, 5.8), 0xffd23f);
         }
         _ => {
-            // blip: a little sprout
-            add(&mut g, &[(at(up, r + 0.6), 0x4caf50), (at(up + 0.3, r + 1.5), 0x7ad97f)]);
+            // blip: a sprout leaf painted near the top
+            fill(&mut g, at(up, 5.8), 0x4caf50);
+            fill(&mut g, at(up + 0.3, 5.2), 0x7ad97f);
         }
     }
     g
