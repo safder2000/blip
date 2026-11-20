@@ -55,6 +55,14 @@ impl ApplicationHandler for Runner {
         if self.wins.owns(id) {
             self.wins.event(a, el, id, event);
         } else {
+            let mut event = event;
+            if let WindowEvent::ScaleFactorChanged { inner_size_writer, .. } = &mut event {
+                // Blip's pop-ups (pet, menu, cards, poops) size themselves for each screen; don't
+                // let Windows stretch them on its own when they cross to a screen with another scale.
+                if let Some(size) = a.overlay_size(id) {
+                    let _ = inner_size_writer.request_inner_size(size);
+                }
+            }
             a.window_event(el, id, event);
         }
     }

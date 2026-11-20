@@ -125,6 +125,10 @@ struct WelcomePage {
     focus: bool,
 }
 
+struct NewPetPage {
+    pet: String,
+}
+
 struct AskPage {
     kind: String,
     prompt: String,
@@ -142,6 +146,7 @@ enum Page {
     Buddies(BuddiesPage),
     Tasks,
     Welcome(WelcomePage),
+    NewPet(NewPetPage),
     Ask(AskPage),
 }
 
@@ -172,6 +177,9 @@ impl Windows {
             let o = self.open.remove(i);
             if let Page::Welcome(w) = &o.page {
                 finish_welcome(app, el, w);
+            }
+            if let Page::NewPet(n) = &o.page {
+                finish_new_pet(app, n);
             }
         }
     }
@@ -244,6 +252,9 @@ impl Windows {
                 if let Page::Welcome(w) = &o.page {
                     finish_welcome(app, el, w);
                 }
+                if let Page::NewPet(n) = &o.page {
+                    finish_new_pet(app, n);
+                }
             } else {
                 i += 1;
             }
@@ -303,6 +314,7 @@ impl Windows {
                 }
                 ("Welcome to Blip", (600.0, 640.0), Page::Welcome(WelcomePage { name: guess, pet: app.pet.s("name").to_string(), focus: true }))
             }
+            "newpet" => ("A new egg", (600.0, 540.0), Page::NewPet(NewPetPage { pet: app.pet.s("name").to_string() })),
             "ask" => {
                 let (title, prompt, text, hint, ok) = ask_texts(app, &arg);
                 (title, (420.0, 165.0), Page::Ask(AskPage { kind: arg.clone(), prompt, text, hint, ok, err: String::new(), focus: true }))
@@ -385,6 +397,7 @@ fn page_ui(ui: &mut Ui, t: &Theme, app: &mut App, el: &ActiveEventLoop, page: &m
             false
         }
         Page::Welcome(p) => welcome_ui(ui, t, app, p),
+        Page::NewPet(p) => new_pet_ui(ui, t, app, p),
         Page::Ask(p) => ask_ui(ui, t, app, el, p),
     }
 }
@@ -584,7 +597,8 @@ fn page_pet(ui: &mut Ui, t: &Theme, app: &mut App, el: &ActiveEventLoop, s: &mut
         });
     });
     gui::section(ui, t, "Look");
-    species_tiles(ui, t, app, app.cfg.bool("named"));
+    // the kind of pet is for life, but a new egg can still become anything until it hatches
+    species_tiles(ui, t, app, app.cfg.bool("named") && app.pet.stage() != "egg");
     gui::section(ui, t, "Colour");
     swatches(ui, t, app);
     ui.add_space(4.0);
@@ -1354,6 +1368,36 @@ fn welcome_ui(ui: &mut Ui, t: &Theme, app: &mut App, s: &mut WelcomePage) -> boo
         });
     });
     done
+}
+
+/// After the old pet left and a new egg arrived: pick who hatches from it.
+fn new_pet_ui(ui: &mut Ui, t: &Theme, app: &mut App, s: &mut NewPetPage) -> bool {
+    header(ui, t, "heart", "A new egg!", "Pick who hatches from it. Once it hatches, that's who your pet is.");
+    let mut done = false;
+    gui::section(ui, t, "Pick your pet");
+    species_tiles(ui, t, app, false);
+    ui.add_space(4.0);
+    swatches(ui, t, app);
+    ui.add_space(14.0);
+    ui.horizontal(|ui| {
+        ui.label("Pet's name");
+        gui::field(ui, &mut s.pet, 160.0, "", false);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if gui::button(ui, t, "That's the one", Some("heart"), Kind::Primary, false, true).clicked() {
+                done = true;
+            }
+        });
+    });
+    done
+}
+
+fn finish_new_pet(app: &mut App, n: &NewPetPage) {
+    let pet: String = n.pet.trim().chars().take(16).collect();
+    if !pet.is_empty() {
+        app.pet.set("name", json!(pet));
+    }
+    app.save();
+    app.chirp("love", Some("heart"), 4.0);
 }
 
 fn finish_welcome(app: &mut App, el: &ActiveEventLoop, w: &WelcomePage) {

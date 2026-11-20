@@ -23,6 +23,21 @@ pub struct CardWin {
     drag_from: Option<(f64, f64, i32, i32)>,
     dirty: bool,
     sliding: bool,
+    /// it moved: check whether it's now on a screen with a different scale
+    check_scale: bool,
+}
+
+impl CardWin {
+    /// Lay the card out again at `scale` (it was dragged or stacked onto a screen with a
+    /// different scale), keeping what's hovered and the slider level.
+    fn rescale(&mut self, scale: f64, fonts: &mut Fonts) {
+        let c = &self.card;
+        let mut card = Card::with_slider(&c.title.clone(), &c.body.clone(), &c.kind.clone(), c.icon, c.buttons.clone(), c.slider.clone(), scale, fonts);
+        card.hover = None;
+        self.card = card;
+        self.canvas = Canvas::new(self.card.w, self.card.h);
+        self.dirty = true;
+    }
 }
 
 pub struct ShowCard<'a> {
@@ -71,6 +86,7 @@ impl CardStack {
             drag_from: None,
             dirty: true,
             sliding: false,
+            check_scale: false,
         });
     }
 
@@ -81,6 +97,10 @@ impl CardStack {
     /// Close `key` without running its close command.
     pub fn remove(&mut self, key: &str) {
         self.cards.retain(|c| c.key != key);
+    }
+
+    pub fn window(&self, id: WindowId) -> Option<std::sync::Arc<winit::window::Window>> {
+        self.cards.iter().find(|c| c.win.id() == id).map(|c| c.win.window.clone())
     }
 
     pub fn owns(&self, id: WindowId) -> bool {
@@ -109,6 +129,19 @@ impl CardStack {
                 y -= c.card.h as f64 + 4.0;
                 x = ((anchor_x - c.card.w as f64 / 2.0).min(r - c.card.w as f64 - 8.0).max(l + 8.0)) as i32;
                 cy = (y.max(t + 8.0)) as i32;
+            }
+            if c.check_scale || x != c.win.x || cy != c.win.y {
+                c.check_scale = false;
+                let (cw, ch) = (c.card.w as f64, c.card.h as f64);
+                let scale = platform::work_area_at(x as f64 + cw / 2.0, cy as f64 + ch / 2.0).1.max(1.0);
+                if (scale - c.card.scale()).abs() > 0.01 {
+                    crate::log(&format!("card {} rescaled {} -> {scale}", c.key, c.card.scale()));
+                    c.rescale(scale, fonts);
+                    if c.dragged {
+                        // keep it under the pointer: same middle, new size
+                        x = (x as f64 + (cw - c.card.w as f64) / 2.0) as i32;
+                    }
+                }
             }
             if c.dirty || x != c.win.x || cy != c.win.y {
                 if c.dirty {
@@ -174,7 +207,9 @@ impl CardStack {
                 }
             }
             WindowEvent::MouseInput { state: ElementState::Released, button: MouseButton::Left, .. } => {
-                c.drag_from = None;
+                if c.drag_from.take().is_some() && c.dragged {
+                    c.check_scale = true;
+                }
                 if std::mem::take(&mut c.sliding) {
                     return out;
                 }

@@ -5,7 +5,7 @@
 use std::ptr::null_mut;
 
 use blip_pet::body::Rect;
-use windows_sys::Win32::Foundation::{HWND, POINT, SIZE};
+use windows_sys::Win32::Foundation::{HWND, POINT, RECT, SIZE};
 use windows_sys::Win32::Graphics::Gdi::{
     CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, MonitorFromPoint, ReleaseDC,
     SelectObject, AC_SRC_ALPHA, AC_SRC_OVER, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLENDFUNCTION, DIB_RGB_COLORS,
@@ -14,7 +14,7 @@ use windows_sys::Win32::Graphics::Gdi::{
 use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetCursorPos, GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, ShowWindow, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, UpdateLayeredWindow, GWL_EXSTYLE, SW_SHOWNOACTIVATE,
+    GetCursorPos, GetWindowLongPtrW, GetWindowRect, SetWindowLongPtrW, SetWindowPos, ShowWindow, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, UpdateLayeredWindow, GWL_EXSTYLE, SW_SHOWNOACTIVATE,
     ULW_ALPHA, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
@@ -66,17 +66,25 @@ impl Surface {
         for &p in pixels {
             hash = (hash ^ p as u64).wrapping_mul(0x0000_0100_0000_01b3);
         }
-        if self.last == Some((x, y, w, h, hash)) {
+        // Moving to a screen with a different scale makes Windows resize the window on its own;
+        // a layered window then shows its picture cropped or stretched until it's sent again.
+        let mut rect: RECT = unsafe { std::mem::zeroed() };
+        let resized = unsafe { GetWindowRect(self.hwnd, &mut rect) } != 0 && (rect.right - rect.left != w || rect.bottom - rect.top != h);
+        if self.last == Some((x, y, w, h, hash)) && !resized {
             return;
         }
-        let same_picture = self.last.map_or(false, |l| (l.2, l.3, l.4) == (w, h, hash));
+        let same_picture = !resized && self.last.map_or(false, |l| (l.2, l.3, l.4) == (w, h, hash));
+        let size_changed = self.last.map_or(true, |l| (l.2, l.3) != (w, h)) || resized;
         self.last = Some((x, y, w, h, hash));
         // Move the window the ordinary way. Moving it through UpdateLayeredWindow (as the pet walks)
         // leaves Windows routing real mouse clicks past it until something else takes the
         // foreground - the "pet can't be clicked until I click the taskbar" bug.
-        if self.at != Some((x, y)) {
+        if self.at != Some((x, y)) || size_changed {
             unsafe {
-                SetWindowPos(self.hwnd, null_mut(), x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE);
+                // the size goes through here too: after a scale change Windows only shows as much of a
+                // layered window as its last SetWindowPos size, whatever UpdateLayeredWindow says
+                let flags = if size_changed { 0 } else { SWP_NOSIZE };
+                SetWindowPos(self.hwnd, null_mut(), x, y, w, h, flags | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE);
             }
             self.at = Some((x, y));
         }
@@ -113,6 +121,11 @@ impl Surface {
                 let src = POINT { x: 0, y: 0 };
                 if UpdateLayeredWindow(self.hwnd, screen, std::ptr::null(), &size, dc, &src, 0, &blend, ULW_ALPHA) == 0 {
                     self.failures += 1;
+                }
+                if std::env::var_os("BLIP_DEBUG_ULW").is_some() {
+                    let mut r: RECT = std::mem::zeroed();
+                    GetWindowRect(self.hwnd, &mut r);
+                    crate::log(&format!("ULW {w}x{h} at {x},{y} resized={resized} failures={} rect={}x{}", self.failures, r.right - r.left, r.bottom - r.top));
                 }
                 SelectObject(dc, old);
                 DeleteObject(bmp);

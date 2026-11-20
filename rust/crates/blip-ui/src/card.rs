@@ -66,6 +66,13 @@ pub struct Card {
 const BODY: f32 = 13.3;
 
 impl Card {
+    /// The screen scale this card was laid out for.
+    pub fn scale(&self) -> f64 {
+        self.s
+    }
+}
+
+impl Card {
     pub fn new(title: &str, body: &str, kind: &str, icon: Option<&'static str>, buttons: Vec<(String, String)>, scale: f64, fonts: &mut Fonts) -> Card {
         Card::with_slider(title, body, kind, icon, buttons, None, scale, fonts)
     }

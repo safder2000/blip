@@ -961,6 +961,19 @@ impl App {
         crate::office::menu_items(self)
     }
 
+    /// Current size of one of the app's own pop-up windows.
+    pub fn overlay_size(&self, id: WindowId) -> Option<winit::dpi::PhysicalSize<u32>> {
+        let w = self
+            .pet_win
+            .iter()
+            .chain(self.menu.as_ref().map(|m| &m.win))
+            .chain(self.poops.iter().map(|p| &p.win))
+            .find(|w| w.id() == id)
+            .map(|w| w.window.clone())
+            .or_else(|| self.cards.window(id))?;
+        Some(w.inner_size())
+    }
+
     pub fn open_menu(&mut self, el: &ActiveEventLoop, at_x: f64, at_y: f64) {
         crate::log(&format!("menu opens at {at_x},{at_y}"));
         self.open_menu_kind(el, at_x, at_y, "main");
@@ -1186,6 +1199,10 @@ impl App {
                 self.pet.new_egg(wall);
                 self.body.set(Action::Idle, 2.0, now);
                 self.flush_events(el);
+                // a new pet: let them pick who hatches (the old one's kind doesn't carry over)
+                if self.cfg.bool("named") {
+                    self.want_window.push("newpet".into());
+                }
             }
             ["hide"] => self.set_visible(false),
             ["show"] => self.set_visible(true),
