@@ -134,6 +134,11 @@ pub fn left_button_down() -> bool {
     unsafe { NSEvent::pressedMouseButtons() & 1 != 0 }
 }
 
+/// Any mouse button held right now, anywhere on screen (to close the menu on an outside click).
+pub fn any_button_down() -> bool {
+    unsafe { NSEvent::pressedMouseButtons() != 0 }
+}
+
 pub fn data_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
         .join("Library/Application Support/Blip")

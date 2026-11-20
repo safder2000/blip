@@ -12,7 +12,7 @@ use windows_sys::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MONITORINFO, MONITOR_DEFAULTTONEAREST,
 };
 use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetCursorPos, GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, ShowWindow, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, UpdateLayeredWindow, GWL_EXSTYLE, SW_SHOWNOACTIVATE,
     ULW_ALPHA, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
@@ -164,6 +164,11 @@ pub fn cursor() -> (f64, f64) {
 
 pub fn left_button_down() -> bool {
     unsafe { (GetAsyncKeyState(VK_LBUTTON as i32) as u16 & 0x8000) != 0 }
+}
+
+/// Any mouse button held right now, anywhere on screen (to close the menu on an outside click).
+pub fn any_button_down() -> bool {
+    [VK_LBUTTON, VK_RBUTTON, VK_MBUTTON].iter().any(|k| unsafe { (GetAsyncKeyState(*k as i32) as u16 & 0x8000) != 0 })
 }
 
 pub fn data_dir() -> std::path::PathBuf {

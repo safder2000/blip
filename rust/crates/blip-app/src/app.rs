@@ -40,6 +40,8 @@ struct MenuWin {
     away_since: Option<f64>,
     dirty: bool,
     sticky: bool,
+    /// a mouse button was down at the last tick (so a new click outside closes the menu)
+    btn_was: bool,
 }
 
 struct PoopWin {
@@ -975,11 +977,24 @@ impl App {
         win.x = x;
         win.y = y;
         win.window.focus_window();
-        self.menu = Some(MenuWin { win, menu, canvas: Canvas::new(w, h), had_focus: false, opened: self.now(), away_since: None, dirty: true, sticky: false });
+        self.menu = Some(MenuWin { win, menu, canvas: Canvas::new(w, h), had_focus: false, opened: self.now(), away_since: None, dirty: true, sticky: false, btn_was: platform::any_button_down() });
     }
 
     fn menu_tick(&mut self, now: f64) {
         let Some(m) = self.menu.as_mut() else { return };
+        // A click anywhere outside the menu closes it. The menu often can't take focus (the pet
+        // never does), so losing focus alone isn't enough: watch the mouse buttons directly.
+        let down = platform::any_button_down();
+        let fresh = down && !m.btn_was;
+        m.btn_was = down;
+        if fresh && now - m.opened > 0.15 {
+            let (mx, my) = platform::cursor();
+            if !m.win.contains(mx, my, 0) {
+                crate::log("menu closed: click outside");
+                self.menu = None;
+                return;
+            }
+        }
         if m.sticky {
             if now - m.opened > 15.0 {
                 self.menu = None;

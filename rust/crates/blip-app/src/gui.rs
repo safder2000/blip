@@ -273,17 +273,21 @@ impl GuiWin {
         let delay = delay.min(Duration::from_secs(1));
         self.next_paint = Some(Instant::now() + delay);
         let prims = self.ctx.tessellate(out.shapes, out.pixels_per_point);
-        self.painter.update_textures(&out.textures_delta);
+        // handled here, then cleared (egui checks in debug builds that no delta is dropped unused)
+        let mut td = out.textures_delta;
+        self.painter.update_textures(&td);
         let size = self.window.inner_size();
         let (Some(w), Some(h)) = (NonZeroU32::new(size.width), NonZeroU32::new(size.height)) else {
-            self.painter.free_textures(&out.textures_delta);
+            self.painter.free_textures(&td);
+            td.clear();
             return;
         };
         let (wu, hu) = (w.get() as usize, h.get() as usize);
         self.buf.clear();
         self.buf.resize(wu * hu, t.bg);
         self.painter.paint(&prims, out.pixels_per_point, &mut self.buf, wu, hu);
-        self.painter.free_textures(&out.textures_delta);
+        self.painter.free_textures(&td);
+        td.clear();
         if self.surface.resize(w, h).is_ok() {
             if let Ok(mut b) = self.surface.buffer_mut() {
                 if b.len() == self.buf.len() {
