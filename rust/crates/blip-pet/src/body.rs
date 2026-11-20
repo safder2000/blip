@@ -60,6 +60,8 @@ pub enum Action {
     Ring,
     /// the pet left: float gently as a ghost
     Gone,
+    /// swinging its pickaxe in place for a few seconds
+    Dig,
 }
 
 /// How it reacts after a throw lands. Picked at random (never the same twice in a row), so
@@ -124,6 +126,9 @@ pub struct Body {
     pub ring_target: Option<f64>,
     /// sideways shake while ringing, for drawing
     pub jitter: f64,
+    /// walking over to this x (window left) to pick something up; `arrived` once there
+    pub goal: Option<f64>,
+    pub arrived: bool,
     /// how it reacts to this landing, and which one it did last time
     pub landing: Landing,
     last_landing: Landing,
@@ -175,6 +180,8 @@ impl Body {
             blink: false,
             ring_target: None,
             jitter: 0.0,
+            goal: None,
+            arrived: false,
             landing: Landing::Proud,
             last_landing: Landing::Proud,
             unfold_face: 0,
@@ -259,6 +266,19 @@ impl Body {
                     self.vx = 0.0;
                 }
                 match self.action {
+                    Action::Walk if self.goal.is_some() => {
+                        let gx = self.goal.unwrap_or(self.x);
+                        let step = if self.slow { 0.7 } else { 1.5 } * s;
+                        if (gx - self.x).abs() <= step {
+                            self.x = gx;
+                            self.goal = None;
+                            self.arrived = true;
+                            self.set(Action::Idle, 1.0, now);
+                        } else {
+                            self.dir = if gx > self.x { 1 } else { -1 };
+                            self.x += self.dir as f64 * step;
+                        }
+                    }
                     Action::Walk => self.x += self.dir as f64 * if self.slow { 0.7 } else { 1.5 } * s,
                     Action::Play if now < self.action_until => self.jump(),
                     Action::Unfold if self.landing == Landing::Shake => {
@@ -481,6 +501,7 @@ impl Body {
                 }
             }
             Action::Idle | Action::Walk if now >= self.action_until => self.choose(now),
+            Action::Dig if now >= self.action_until => self.set(Action::Idle, 1.5, now),
             Action::Play if now >= self.action_until && !self.airborne => self.set(Action::Idle, 2.0, now),
             _ => {}
         }
@@ -634,13 +655,16 @@ impl Body {
         if let Some(progress) = egg {
             return sprites::build_egg(self.frame, progress);
         }
-        let facing = if self.action == Action::Unfold {
+        let facing = if self.action == Action::Dig {
+            self.dir
+        } else if self.action == Action::Unfold {
             self.unfold_face
         } else if matches!(self.action, Action::Walk | Action::Play | Action::Eat) || (self.action == Action::Ring && self.ring_target.is_some()) { self.dir } else { 0 };
         let squash = self.land > 0
             || match self.action {
                 Action::Walk | Action::Ring => self.frame % 2 == 0,
                 Action::Sleep => self.frame % 8 < 4,
+                Action::Dig => self.frame % 2 == 1,
                 _ => self.frame % 6 == 0,
             };
         let blink = (mood == "normal" || mood == "sad") && self.blink;
@@ -654,6 +678,11 @@ impl Body {
             blink,
             species: &look.species,
         });
+        let plook = sprites::PetLook { stage: look.stage, palette: &look.palette, mood, frame: self.frame, facing, squash, blink, species: &look.species };
+        sprites::add_wear(&mut g, &plook, &look.wear);
+        if self.action == Action::Dig {
+            sprites::add_pickaxe(&mut g, &plook, look.pick.max(1), self.frame % 2 == 0);
+        }
         if self.chute > 0 && self.action == Action::Fall {
             let top_row = g.keys().map(|c| c.1).min().unwrap_or(0);
             add_chute(&mut g, top_row, self.chute, self.chute_style);
@@ -668,6 +697,9 @@ pub struct Look {
     pub species: String,
     pub palette: String,
     pub stage: sprites::Stage,
+    /// what it wears (item ids) and its pickaxe tier
+    pub wear: Vec<String>,
+    pub pick: u8,
 }
 
 /// What streams behind a thrown pet: a faint wind streak, or (rarely, very fast throws) fire.

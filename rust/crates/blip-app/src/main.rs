@@ -181,7 +181,12 @@ fn main() {
     }
     // one Blip at a time (same lock as the Python version, so they never run side by side);
     // a test run with its own data folder gets its own lock
-    let name = if std::env::var_os("BLIP_DATA").is_some() { "BlipDesktopPetTest" } else { "BlipDesktopPet" };
+    // test copies (BLIP_DATA) get a lock per data folder, so two test pets can run side by side
+    let name = match std::env::var("BLIP_DATA") {
+        Ok(d) => format!("BlipDesktopPetTest{:x}", d.bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3))),
+        Err(_) => "BlipDesktopPet".to_string(),
+    };
+    let name = name.as_str();
     if !platform::single_instance(name) {
         return;
     }

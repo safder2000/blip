@@ -43,8 +43,10 @@ fn main() {
         stage: "child".into(),
         mood: "normal".into(),
         bars: vec![("meal", 70.0, 0xf0a020), ("play", 55.0, 0xef5b8b), ("moon", 80.0, 0x6b7fd7)],
+        wear: vec!["party".into(), "shades".into()],
+        coins: Some(240),
     };
-    let care: Vec<CareButton> = ["meal:Feed", "snack:Snack", "play:Play", "clean:Clean", "pill:Meds", "moon:Sleep"]
+    let care: Vec<CareButton> = ["meal:Feed", "snack:Snack", "clean:Clean", "pill:Meds", "moon:Sleep", "shop:Shop"]
         .iter()
         .map(|s| {
             let (icon, label) = s.split_once(':').unwrap();

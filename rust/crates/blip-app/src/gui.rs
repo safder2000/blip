@@ -402,6 +402,17 @@ pub fn pet_sprite(species: &str, palette: &str, stage: &str, mood: &str, frame: 
     build_pet(&PetLook { stage: Stage::from_name(stage), palette, mood, frame, facing: 0, squash: false, blink: false, species })
 }
 
+/// Like `pet_sprite`, wearing things (item ids).
+pub fn pet_sprite_wear(species: &str, palette: &str, stage: &str, mood: &str, frame: u32, wear: &[String]) -> Sprite {
+    let mut g = pet_sprite(species, palette, stage, mood, frame);
+    if stage != "egg" {
+        let palette = if sprites::PALETTES.contains(&palette) { palette } else { "gold" };
+        let look = PetLook { stage: Stage::from_name(stage), palette, mood, frame, facing: 0, squash: false, blink: false, species };
+        sprites::add_wear(&mut g, &look, wear);
+    }
+    g
+}
+
 /// A pet drawn in a box of `cells` x `cells` sprite cells, centred.
 pub fn avatar(ui: &mut Ui, g: &Sprite, p: f32, cells: f32) -> Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(cells * p), Sense::click());

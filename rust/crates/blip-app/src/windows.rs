@@ -125,6 +125,16 @@ struct WelcomePage {
     focus: bool,
 }
 
+struct ShopPage {
+    err: String,
+}
+
+struct TradePage {
+    pid: String,
+    give: String,
+    get: String,
+}
+
 struct NewPetPage {
     pet: String,
 }
@@ -147,6 +157,8 @@ enum Page {
     Tasks,
     Welcome(WelcomePage),
     NewPet(NewPetPage),
+    Shop(ShopPage),
+    Trade(TradePage),
     Ask(AskPage),
 }
 
@@ -315,6 +327,8 @@ impl Windows {
                 ("Welcome to Blip", (600.0, 640.0), Page::Welcome(WelcomePage { name: guess, pet: app.pet.s("name").to_string(), focus: true }))
             }
             "newpet" => ("A new egg", (600.0, 540.0), Page::NewPet(NewPetPage { pet: app.pet.s("name").to_string() })),
+            "shop" => ("Shop", (620.0, 700.0), Page::Shop(ShopPage { err: String::new() })),
+            "trade" => ("Swap", (480.0, 360.0), Page::Trade(TradePage { pid: arg.clone(), give: String::new(), get: String::new() })),
             "ask" => {
                 let (title, prompt, text, hint, ok) = ask_texts(app, &arg);
                 (title, (420.0, 165.0), Page::Ask(AskPage { kind: arg.clone(), prompt, text, hint, ok, err: String::new(), focus: true }))
@@ -398,6 +412,11 @@ fn page_ui(ui: &mut Ui, t: &Theme, app: &mut App, el: &ActiveEventLoop, page: &m
         }
         Page::Welcome(p) => welcome_ui(ui, t, app, p),
         Page::NewPet(p) => new_pet_ui(ui, t, app, p),
+        Page::Shop(p) => {
+            shop_ui(ui, t, app, p);
+            false
+        }
+        Page::Trade(p) => trade_ui(ui, t, app, el, p),
         Page::Ask(p) => ask_ui(ui, t, app, el, p),
     }
 }
@@ -603,6 +622,17 @@ fn page_pet(ui: &mut Ui, t: &Theme, app: &mut App, el: &ActiveEventLoop, s: &mut
     swatches(ui, t, app);
     ui.add_space(4.0);
     gui::muted(ui, t, "Auto: changes as your pet grows, and its grown-up colour shows how well it was looked after.");
+    gui::section(ui, t, "Coins & shop");
+    let mut coins_on = app.coins_on();
+    if gui::toggle_row(ui, t, "Coins & shop", "Your pet finds and digs up coins while it's looked after; spend them in the shop. Off: no coins, no digging.", &mut coins_on) {
+        app.cfg.set("coins", json!(coins_on));
+        app.save();
+    }
+    let mut share = app.cfg.v.get("share_things").and_then(Value::as_bool).unwrap_or(true);
+    if gui::toggle_row(ui, t, "Show my pet's things to buddies", "Buddies see what it wears and its pickaxe (never any coin counts), and can offer swaps.", &mut share) {
+        app.cfg.set("share_things", json!(share));
+        app.save();
+    }
     if app.pet.gone() {
         ui.add_space(10.0);
         if gui::button(ui, t, "Hatch a new egg", Some("heart"), Kind::Primary, false, true).clicked() {
@@ -1255,7 +1285,7 @@ fn buddies_ui(ui: &mut Ui, t: &Theme, app: &mut App, el: &ActiveEventLoop, s: &m
         for p in &peers {
             gui::card(ui, t, 8, |ui| {
                 ui.horizontal(|ui| {
-                    let g = gui::pet_sprite(&p.species, &p.palette, &p.stage, "normal", 1);
+                    let g = gui::pet_sprite_wear(&p.species, &p.palette, &p.stage, "normal", 1, &p.wear);
                     let px = gui::px(ui, 1.5);
                     gui::avatar(ui, &g, px, 30.0);
                     ui.vertical(|ui| {
@@ -1274,6 +1304,22 @@ fn buddies_ui(ui: &mut Ui, t: &Theme, app: &mut App, el: &ActiveEventLoop, s: &m
                             }
                             gui::muted(ui, t, &txt);
                         });
+                        if p.pick > 0 || p.finds > 0 {
+                            let mut flex = String::new();
+                            if p.pick > 0 {
+                                flex += &format!("{} pickaxe", blip_core::coins::PICK_NAMES[p.pick as usize]);
+                            }
+                            if p.finds > 0 {
+                                if !flex.is_empty() {
+                                    flex += "  \u{b7}  ";
+                                }
+                                flex += &format!("{} find{}", p.finds, if p.finds == 1 { "" } else { "s" });
+                            }
+                            ui.horizontal(|ui| {
+                                gui::icon(ui, "pick", gui::px(ui, 1.2), c(blip_pet::sprites::pick_color(p.pick.max(1))));
+                                gui::muted(ui, t, &flex);
+                            });
+                        }
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if gui::button(ui, t, "Message", Some("mail"), Kind::Soft, true, true).clicked() {
@@ -1281,6 +1327,12 @@ fn buddies_ui(ui: &mut Ui, t: &Theme, app: &mut App, el: &ActiveEventLoop, s: &m
                         }
                         if gui::button(ui, t, "Call", Some("phone"), Kind::Primary, true, true).clicked() {
                             app.run(el, &format!("call:{}", p.id));
+                        }
+                        let can_swap = app.coins_on()
+                            && p.owned.iter().any(|i| blip_core::coins::tradeable(i) && !app.pet.owns(i))
+                            && app.pet.owned().iter().any(|i| blip_core::coins::tradeable(i) && !p.owned.contains(i));
+                        if can_swap && gui::button(ui, t, "Swap", Some("gift"), Kind::Soft, true, true).clicked() {
+                            app.want_window.push(format!("trade:{}", p.id));
                         }
                     });
                 });
@@ -1498,4 +1550,216 @@ fn ask_ui(ui: &mut Ui, t: &Theme, app: &mut App, el: &ActiveEventLoop, s: &mut A
         _ => {}
     }
     true
+}
+
+// ---------------------------------------------------------------- shop (docs/coins.md)
+fn coin_label(ui: &mut Ui, t: &Theme, n: u64, big: bool) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        gui::icon(ui, "coin", gui::px(ui, if big { 2.0 } else { 1.4 }), c(0xe0a020));
+        if big {
+            gui::h2(ui, &n.to_string());
+        } else {
+            gui::colored(ui, &n.to_string(), t.ink, 13.0);
+        }
+    });
+}
+
+fn shop_ui(ui: &mut Ui, t: &Theme, app: &mut App, s: &mut ShopPage) {
+    use blip_core::coins::{self, Kind as It, ITEMS};
+    header(ui, t, "shop", "Shop", "Coins come slowly while your pet is looked after and you're at your desk.");
+    let wallet = app.pet.coins();
+    gui::card(ui, t, 12, |ui| {
+        ui.horizontal(|ui| {
+            coin_label(ui, t, wallet, true);
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let why = app.pet.paused_why;
+                if why.is_empty() {
+                    gui::muted(ui, t, "Coins are coming in");
+                } else {
+                    gui::muted(ui, t, &format!("Coins paused: {why}"));
+                }
+            });
+        });
+        if !s.err.is_empty() {
+            gui::colored(ui, &s.err, t.danger, 12.5);
+        }
+    });
+    let species = app.pet.species().to_string();
+    let palette = app.pet.palette();
+    let stage = if app.pet.stage() == "egg" { "adult".to_string() } else { app.pet.stage().to_string() };
+    let mut act: Option<(String, String)> = None; // (verb, id)
+    egui::ScrollArea::vertical().id_salt("shop").auto_shrink([false, false]).show(ui, |ui| {
+        // pickaxe: one upgrade at a time
+        gui::section(ui, t, "Pickaxe");
+        let tier = app.pet.pick();
+        gui::card(ui, t, 12, |ui| {
+            ui.horizontal(|ui| {
+                gui::icon(ui, "pick", gui::px(ui, 2.0), c(blip_pet::sprites::pick_color(tier.max(1))));
+                ui.vertical(|ui| {
+                    if tier == 0 {
+                        gui::bold(ui, "No pickaxe yet");
+                        gui::muted(ui, t, "With one, your pet digs up coins now and then.");
+                    } else {
+                        let it = ITEMS.iter().find(|i| i.kind == It::Pick(tier));
+                        gui::bold(ui, it.map(|i| i.name).unwrap_or("Pickaxe"));
+                        gui::muted(ui, t, it.map(|i| i.about).unwrap_or(""));
+                    }
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if let Some(next) = ITEMS.iter().find(|i| i.kind == It::Pick(tier + 1)) {
+                        let label = format!("{} \u{b7} {}", next.name.replace(" pickaxe", ""), next.price);
+                        if gui::button(ui, t, &label, Some("coin"), Kind::Primary, true, wallet >= next.price).clicked() {
+                            act = Some(("buy".into(), next.id.into()));
+                        }
+                    } else {
+                        gui::muted(ui, t, "The best there is");
+                    }
+                });
+            });
+        });
+
+        // things to wear
+        gui::section(ui, t, "Wear");
+        let wearing = app.pet.wearing();
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
+            for it in ITEMS.iter().filter(|i| matches!(i.kind, It::Head | It::Face)) {
+                let owned = app.pet.owns(it.id);
+                let on = wearing.iter().any(|w| w == it.id);
+                // preview: the pet with this on, plus whatever it wears in the other slot
+                let mut wear: Vec<String> = wearing
+                    .iter()
+                    .filter(|w| coins::item(w).map(|x| x.kind) != Some(it.kind))
+                    .cloned()
+                    .collect();
+                wear.push(it.id.into());
+                ui.allocate_ui_with_layout(Vec2::new(118.0, 150.0), Layout::top_down(Align::Center), |ui| {
+                    gui::card(ui, t, 8, |ui| {
+                        ui.set_width(100.0);
+                        ui.vertical_centered(|ui| {
+                            let g = gui::pet_sprite_wear(&species, &palette, &stage, "happy", 1, &wear);
+                            gui::avatar(ui, &g, gui::px(ui, 2.0), 30.0);
+                            gui::bold(ui, it.name);
+                            if owned {
+                                let (label, verb) = if on { ("Take off", "off") } else { ("Wear", "wear") };
+                                if gui::button(ui, t, label, None, if on { Kind::Soft } else { Kind::Primary }, true, true).clicked() {
+                                    act = Some((verb.into(), it.id.into()));
+                                }
+                            } else if gui::button(ui, t, &it.price.to_string(), Some("coin"), Kind::Soft, true, wallet >= it.price).clicked() {
+                                act = Some(("buy".into(), it.id.into()));
+                            }
+                        });
+                    });
+                });
+            }
+        });
+
+        // pills
+        gui::section(ui, t, "Pills");
+        for it in ITEMS.iter().filter(|i| i.kind == It::Pill) {
+            let have = app.pet.pills(it.id);
+            gui::card(ui, t, 10, |ui| {
+                ui.horizontal(|ui| {
+                    gui::icon(ui, if it.id == "energy" { "pill" } else { "moon" }, gui::px(ui, 2.0), c(t.accent));
+                    ui.vertical(|ui| {
+                        gui::bold(ui, &format!("{}  \u{d7}{have}", it.name));
+                        gui::muted(ui, t, it.about);
+                    });
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if gui::button(ui, t, &it.price.to_string(), Some("coin"), Kind::Soft, true, wallet >= it.price).clicked() {
+                            act = Some(("buy".into(), it.id.into()));
+                        }
+                        if have > 0 && gui::button(ui, t, "Use", None, Kind::Primary, true, true).clicked() {
+                            act = Some(("use".into(), it.id.into()));
+                        }
+                    });
+                });
+            });
+            ui.add_space(4.0);
+        }
+
+        // finds shelf
+        gui::section(ui, t, "Finds");
+        let finds = app.pet.finds();
+        gui::muted(ui, t, "Rare things that turn up while digging.");
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
+            for (id, name) in coins::FINDS {
+                let n = finds.get(id).and_then(Value::as_u64).unwrap_or(0);
+                gui::card(ui, t, 8, |ui| {
+                    ui.set_width(84.0);
+                    ui.vertical_centered(|ui| {
+                        if n > 0 {
+                            gui::bold(ui, name);
+                            gui::muted(ui, t, &format!("\u{d7}{n}"));
+                        } else {
+                            gui::bold(ui, "?");
+                            gui::muted(ui, t, "not yet");
+                        }
+                    });
+                });
+            }
+        });
+        ui.add_space(8.0);
+        gui::muted(ui, t, "Swap hats and glasses with buddies from the Buddies window.");
+    });
+    if let Some((verb, id)) = act {
+        s.err.clear();
+        let r = match verb.as_str() {
+            "buy" => app.pet.buy(&id),
+            "use" => app.pet.use_pill(&id),
+            "wear" => {
+                app.pet.wear(&id);
+                Ok(())
+            }
+            _ => {
+                let slot = if coins::item(&id).map(|i| i.kind) == Some(It::Face) { "face" } else { "head" };
+                app.pet.take_off(slot);
+                Ok(())
+            }
+        };
+        if let Err(e) = r {
+            s.err = e;
+        }
+        app.flush_pet_events();
+    }
+}
+
+// ---------------------------------------------------------------- swapping with a buddy
+fn trade_ui(ui: &mut Ui, t: &Theme, app: &mut App, el: &ActiveEventLoop, s: &mut TradePage) -> bool {
+    use blip_core::coins::{item, tradeable};
+    let Some(peer) = office::peers(app).into_iter().find(|p| p.id == s.pid) else {
+        gui::empty_state(ui, t, "They went offline", "Try again when they're back.");
+        return false;
+    };
+    header(ui, t, "gift", &format!("Swap with {}", peer.name), "One of yours for one of theirs. They get to say yes or no.");
+    let mine: Vec<String> = app.pet.owned().into_iter().filter(|i| tradeable(i) && !peer.owned.contains(i)).collect();
+    let theirs: Vec<String> = peer.owned.iter().filter(|i| tradeable(i) && !app.pet.owns(i)).cloned().collect();
+    let name = |id: &String| item(id).map(|i| i.name).unwrap_or("?");
+    gui::section(ui, t, "You give");
+    if mine.is_empty() {
+        gui::muted(ui, t, "Nothing of yours they don't already have.");
+    } else {
+        let opts: Vec<(&str, &str)> = mine.iter().map(|i| (i.as_str(), name(i))).collect();
+        gui::chips(ui, t, &opts, &mut s.give);
+    }
+    gui::section(ui, t, "You get");
+    if theirs.is_empty() {
+        gui::muted(ui, t, "They have nothing you don't already have.");
+    } else {
+        let opts: Vec<(&str, &str)> = theirs.iter().map(|i| (i.as_str(), name(i))).collect();
+        gui::chips(ui, t, &opts, &mut s.get);
+    }
+    ui.add_space(16.0);
+    let ready = mine.contains(&s.give) && theirs.contains(&s.get);
+    let mut done = false;
+    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        if gui::button(ui, t, "Offer swap", Some("gift"), Kind::Primary, false, ready).clicked() {
+            app.run(el, &format!("trade:offer:{}:{}:{}", s.pid, s.give, s.get));
+            done = true;
+        }
+    });
+    done
 }

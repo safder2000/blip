@@ -42,6 +42,7 @@ pub fn spawn(parts: &mut Vec<Particle>, kind: &'static str, n: u32, top_row: i32
             "z" => Particle { kind, x: 19, y: top_row - 2, life: 6 },
             "bang" => Particle { kind, x: [5, 8, 23, 26][ri(r, 0, 3) as usize], y: top_row - 1, life: 3 },
             "star" => Particle { kind, x: ri(r, 9, 21), y: top_row - 1, life: 3 },
+            "coin" => Particle { kind, x: ri(r, 11, 19), y: top_row - 1, life: 4 },
             "dust" => Particle { kind, x: [3, 5, 24, 26][ri(r, 0, 3) as usize], y: GH - 2, life: 2 },
             _ => Particle { kind: "note", x: ri(r, 4, 26), y: top_row - 2, life: 5 },
         };
@@ -69,6 +70,7 @@ pub fn add_particles(g: &mut Sprite, parts: &[Particle]) {
             "spark" => (&sprites::SPARK, col::SPARK),
             "bang" => (&sprites::BANG, col::ALERT),
             "star" => (&sprites::SPARK, 0xffd23f),
+            "coin" => (&[(1, 0), (0, 1), (1, 1), (2, 1), (1, 2)], 0xffc83d),
             "dust" => (&[(0, 0), (1, 0), (0, 1), (1, 1), (2, 1)], 0xcfc8dc),
             _ => (&sprites::NOTE, col::Z),
         };

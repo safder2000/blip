@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use serde_json::{json, Map, Value};
 
 use crate::store::{read_json, write_json};
+use crate::coins::{self, Kind};
 use crate::Rng;
 
 pub const HOUR: f64 = 3600.0;
@@ -36,6 +37,10 @@ pub enum Ev {
     Left,
     /// it fell asleep / woke up on its own
     Asleep(bool),
+    /// it found a coin: drop one on the taskbar next to it
+    CoinFound,
+    /// time to dig: swing the pickaxe, then these go to the wallet
+    Dig { coins: u64, find: Option<&'static str> },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -54,6 +59,13 @@ pub struct Pet {
     pub events: Vec<Ev>,
     last_pat: f64,
     last_toss: f64,
+    /// seconds of earning time until the next find / dig
+    find_in: f64,
+    dig_in: f64,
+    /// set by the app each tick: coins are on, someone is at the PC, nothing fullscreen, no call
+    pub earn_ok: bool,
+    /// why coins aren't coming right now ("" when they are), for the shop's header
+    pub paused_why: &'static str,
 }
 
 pub fn fresh_state(gen: i64, name: &str, now: f64) -> Map<String, Value> {
@@ -79,7 +91,10 @@ impl Pet {
             st.extend(saved);
             st.insert("stats".into(), Value::Object(stats));
         }
-        Pet { path, st, rng: Rng::new(), events: vec![], last_pat: 0.0, last_toss: 0.0 }
+        let mut rng = Rng::new();
+        let find_in = coins::FIND_EVERY.0 + rng.f() * (coins::FIND_EVERY.1 - coins::FIND_EVERY.0);
+        let dig_in = coins::DIG_EVERY.0 + rng.f() * (coins::DIG_EVERY.1 - coins::DIG_EVERY.0);
+        Pet { path, st, rng, events: vec![], last_pat: 0.0, last_toss: 0.0, find_in, dig_in, earn_ok: false, paused_why: "" }
     }
 
     pub fn save(&self) {
@@ -233,7 +248,8 @@ impl Pet {
         if self.asleep() {
             self.add_stat("full", -4.0 * h);
             self.add_stat("happy", -1.0 * h);
-            self.add_stat("energy", 30.0 * h);
+            // a sleep pill makes this nap recover 3x faster
+            self.add_stat("energy", if self.b("dream") { 90.0 } else { 30.0 } * h);
             self.add_stat("hygiene", -1.0 * h);
         } else {
             self.add_stat("full", -10.0 * h);
@@ -286,6 +302,10 @@ impl Pet {
                 self.set("care_good", json!(self.f("care_good") + dt));
             }
         }
+        if !self.asleep() && self.b("dream") {
+            self.set("dream", json!(false));
+        }
+        self.coin_step(dt, idle);
         self.check_growth();
         if self.stat("health") <= 0.0 {
             self.leave();
@@ -403,7 +423,12 @@ impl Pet {
         let gen = self.f("gen") as i64 + 1;
         let name = self.s("name").to_string();
         let (x, wander) = (self.st.get("x").cloned().unwrap_or(Value::Null), self.st.get("wander").cloned().unwrap_or(json!(true)));
+        let bag = self.st.get("bag").cloned();
         self.st = fresh_state(gen, &name, now);
+        if let Some(bag) = bag {
+            // the wallet, wardrobe and finds belong to the person, not the pet
+            self.st.insert("bag".into(), bag);
+        }
         self.surprise_look();
         self.set("x", x);
         self.set("wander", wander);
@@ -636,5 +661,233 @@ impl Pet {
             }
         }
         true
+    }
+}
+
+// ------------------------------------------------ coins, the shop, finds (docs/coins.md)
+impl Pet {
+    fn bag(&self) -> Map<String, Value> {
+        self.st.get("bag").and_then(Value::as_object).cloned().unwrap_or_default()
+    }
+    fn set_bag(&mut self, k: &str, v: Value) {
+        let mut b = self.bag();
+        b.insert(k.into(), v);
+        self.st.insert("bag".into(), Value::Object(b));
+    }
+    fn bag_u64(&self, k: &str) -> u64 {
+        self.bag().get(k).and_then(Value::as_u64).unwrap_or(0)
+    }
+    pub fn coins(&self) -> u64 {
+        self.bag_u64("coins")
+    }
+    /// Add to the wallet.
+    pub fn add_coins(&mut self, n: u64) {
+        self.set_bag("coins", json!(self.coins() + n));
+        self.save();
+    }
+    /// Pickaxe tier, 0 = none.
+    pub fn pick(&self) -> u8 {
+        self.bag_u64("pick").min(4) as u8
+    }
+    /// Wearables owned (ids).
+    pub fn owned(&self) -> Vec<String> {
+        self.bag().get("owned").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default()
+    }
+    pub fn owns(&self, id: &str) -> bool {
+        self.owned().iter().any(|o| o == id)
+    }
+    fn set_owned(&mut self, v: Vec<String>) {
+        self.set_bag("owned", json!(v));
+    }
+    /// What it wears in a slot ("head" / "face").
+    pub fn worn(&self, slot: &str) -> Option<String> {
+        self.bag().get(slot).and_then(Value::as_str).map(str::to_string).filter(|s| self.owns(s))
+    }
+    /// Everything it wears (head first).
+    pub fn wearing(&self) -> Vec<String> {
+        ["head", "face"].iter().filter_map(|s| self.worn(s)).collect()
+    }
+    pub fn pills(&self, id: &str) -> u64 {
+        self.bag().get("pills").and_then(|p| p.get(id)).and_then(Value::as_u64).unwrap_or(0)
+    }
+    fn set_pills(&mut self, id: &str, n: u64) {
+        let mut p = self.bag().get("pills").and_then(Value::as_object).cloned().unwrap_or_default();
+        p.insert(id.into(), json!(n));
+        self.set_bag("pills", Value::Object(p));
+    }
+    /// Finds on the shelf: id -> how many.
+    pub fn finds(&self) -> Map<String, Value> {
+        self.bag().get("finds").and_then(Value::as_object).cloned().unwrap_or_default()
+    }
+    pub fn add_find(&mut self, id: &str) {
+        let mut f = self.finds();
+        let n = f.get(id).and_then(Value::as_u64).unwrap_or(0) + 1;
+        f.insert(id.into(), json!(n));
+        self.set_bag("finds", Value::Object(f));
+        if id == "gem" {
+            self.set_bag("coins", json!(self.coins() + coins::GEM_COINS));
+        }
+        self.save();
+    }
+
+    /// Buy an item. Err = why not (shown in the shop).
+    pub fn buy(&mut self, id: &str) -> Result<(), String> {
+        let item = coins::item(id).ok_or("No such thing")?;
+        if self.coins() < item.price {
+            return Err("Not enough coins yet".into());
+        }
+        match item.kind {
+            Kind::Pick(t) => {
+                if self.pick() >= t {
+                    return Err("Already has a pickaxe as good".into());
+                }
+                self.set_bag("pick", json!(t));
+            }
+            Kind::Head | Kind::Face => {
+                if self.owns(id) {
+                    return Err("Already yours".into());
+                }
+                let mut o = self.owned();
+                o.push(id.into());
+                self.set_owned(o);
+            }
+            Kind::Pill => self.set_pills(id, self.pills(id) + 1),
+        }
+        self.set_bag("coins", json!(self.coins() - item.price));
+        if matches!(item.kind, Kind::Head | Kind::Face) {
+            self.wear(id);
+        }
+        self.events.push(Ev::Sound("pop"));
+        self.save();
+        Ok(())
+    }
+
+    /// Put on something it owns (replacing what's in that slot).
+    pub fn wear(&mut self, id: &str) {
+        let Some(item) = coins::item(id) else { return };
+        let slot = match item.kind {
+            Kind::Head => "head",
+            Kind::Face => "face",
+            _ => return,
+        };
+        if !self.owns(id) {
+            return;
+        }
+        let mut ever: Vec<String> = self.bag().get("ever_worn").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
+        self.set_bag(slot, json!(id));
+        if !ever.iter().any(|w| w == id) {
+            // the first time it wears something new: one happy chirp, nothing more
+            ever.push(id.into());
+            self.set_bag("ever_worn", json!(ever));
+            if self.hatched() && !self.asleep() {
+                self.chirp("love", Some("heart"), 3.0);
+            }
+        }
+        self.save();
+    }
+
+    pub fn take_off(&mut self, slot: &str) {
+        self.set_bag(slot, Value::Null);
+        self.save();
+    }
+
+    /// Swap a wearable away for another (a trade both sides agreed to).
+    pub fn swap_item(&mut self, give: &str, get: &str) -> bool {
+        if !self.owns(give) || self.owns(get) || !coins::tradeable(give) || !coins::tradeable(get) {
+            return false;
+        }
+        for slot in ["head", "face"] {
+            if self.worn(slot).as_deref() == Some(give) {
+                self.set_bag(slot, Value::Null);
+            }
+        }
+        let mut o: Vec<String> = self.owned().into_iter().filter(|x| x != give).collect();
+        o.push(get.into());
+        self.set_owned(o);
+        self.wear(get);
+        self.save();
+        true
+    }
+
+    /// Use a pill. Err = why not.
+    pub fn use_pill(&mut self, id: &str) -> Result<(), String> {
+        if self.pills(id) == 0 {
+            return Err("None left".into());
+        }
+        if !self.hatched() {
+            return Err("Not now".into());
+        }
+        match id {
+            "energy" => {
+                if self.stat("energy") > 90.0 {
+                    return Err("It isn't tired".into());
+                }
+                self.add_stat("energy", 40.0);
+                self.events.extend([Ev::Spawn("spark", 3), Ev::Happy(2.0)]);
+            }
+            "dream" => {
+                if !self.asleep() {
+                    return Err("Use it while it sleeps".into());
+                }
+                if self.b("dream") {
+                    return Err("Already sleeping deeply".into());
+                }
+                self.set("dream", json!(true));
+                self.events.push(Ev::Spawn("z", 2));
+            }
+            _ => return Err("Can't use that".into()),
+        }
+        self.set_pills(id, self.pills(id) - 1);
+        self.save();
+        Ok(())
+    }
+
+    /// Why coins aren't coming, or "" when they are.
+    fn coin_pause(&self, idle: bool) -> &'static str {
+        if !self.hatched() {
+            "not hatched yet"
+        } else if !self.earn_ok {
+            "you're away or busy"
+        } else if self.asleep() {
+            "asleep"
+        } else if self.b("sick") {
+            "sick"
+        } else if self.stat("full") < coins::CARED {
+            "hungry"
+        } else if self.stat("happy") < coins::CARED {
+            "bored"
+        } else if self.stat("hygiene") < coins::CARED {
+            "needs a clean"
+        } else if !idle {
+            "busy"
+        } else {
+            ""
+        }
+    }
+
+    fn coin_step(&mut self, dt: f64, idle: bool) {
+        self.paused_why = self.coin_pause(idle);
+        if !self.paused_why.is_empty() || dt <= 0.0 || dt > 120.0 {
+            return;
+        }
+        self.find_in -= dt;
+        if self.find_in <= 0.0 {
+            self.find_in = coins::FIND_EVERY.0 + self.rng.f() * (coins::FIND_EVERY.1 - coins::FIND_EVERY.0);
+            self.events.push(Ev::CoinFound);
+        }
+        if self.pick() > 0 {
+            self.dig_in -= dt;
+            if self.dig_in <= 0.0 {
+                self.dig_in = coins::DIG_EVERY.0 + self.rng.f() * (coins::DIG_EVERY.1 - coins::DIG_EVERY.0);
+                let find = (self.rng.f() < coins::FIND_CHANCE).then(|| coins::FINDS[(self.rng.f() * coins::FINDS.len() as f64) as usize % coins::FINDS.len()].0);
+                self.events.push(Ev::Dig { coins: coins::dig_yield(self.pick()), find });
+            }
+        }
+    }
+
+    /// Test hook: make the next find / dig due now.
+    pub fn coins_due_now(&mut self) {
+        self.find_in = 0.0;
+        self.dig_in = 0.0;
     }
 }

@@ -179,6 +179,28 @@ pub fn left_button_down() -> bool {
     unsafe { (GetAsyncKeyState(VK_LBUTTON as i32) as u16 & 0x8000) != 0 }
 }
 
+/// Seconds since the last keyboard or mouse input anywhere (to tell whether someone is at the PC).
+pub fn idle_secs() -> f64 {
+    use windows_sys::Win32::System::SystemInformation::GetTickCount;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
+    unsafe {
+        let mut li = LASTINPUTINFO { cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+        if GetLastInputInfo(&mut li) == 0 {
+            return 0.0;
+        }
+        GetTickCount().wrapping_sub(li.dwTime) as f64 / 1000.0
+    }
+}
+
+/// A fullscreen app, game or presentation is in front (Windows' own "quiet time" signal).
+pub fn fullscreen_busy() -> bool {
+    use windows_sys::Win32::UI::Shell::{SHQueryUserNotificationState, QUNS_BUSY, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN};
+    unsafe {
+        let mut s = 0;
+        SHQueryUserNotificationState(&mut s) >= 0 && (s == QUNS_BUSY || s == QUNS_PRESENTATION_MODE || s == QUNS_RUNNING_D3D_FULL_SCREEN)
+    }
+}
+
 /// Any mouse button held right now, anywhere on screen (to close the menu on an outside click).
 pub fn any_button_down() -> bool {
     [VK_LBUTTON, VK_RBUTTON, VK_MBUTTON].iter().any(|k| unsafe { (GetAsyncKeyState(*k as i32) as u16 & 0x8000) != 0 })

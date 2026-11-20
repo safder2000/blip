@@ -134,6 +134,22 @@ pub fn left_button_down() -> bool {
     unsafe { NSEvent::pressedMouseButtons() & 1 != 0 }
 }
 
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGEventSourceSecondsSinceLastEventType(state: i32, event_type: u32) -> f64;
+}
+
+/// Seconds since the last keyboard or mouse input anywhere (to tell whether someone is at the Mac).
+pub fn idle_secs() -> f64 {
+    // combined session state, any input event
+    unsafe { CGEventSourceSecondsSinceLastEventType(0, u32::MAX) }
+}
+
+/// A fullscreen app or presentation is in front. Not detected on the Mac yet.
+pub fn fullscreen_busy() -> bool {
+    false
+}
+
 /// Any mouse button held right now, anywhere on screen (to close the menu on an outside click).
 pub fn any_button_down() -> bool {
     unsafe { NSEvent::pressedMouseButtons() != 0 }

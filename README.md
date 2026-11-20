@@ -27,7 +27,11 @@ Nothing else is needed: Blip is a single small app with nothing to install along
 ## Use
 
 Right-click the pet for everything: care, timers, colleagues, settings.
-Drag to move it, fling it to throw it.
+Drag to move it, fling it to throw it; patting and throwing it is how you play with it.
+
+A looked-after pet slowly finds and digs up coins while you're at your desk. Spend them in the
+Shop (hats, glasses, pickaxes, pills) and swap wearables with buddies. It never asks for
+attention and can be switched off in Settings; see [docs/coins.md](docs/coins.md).
 
 Pets on the same network find each other automatically. To reach teammates elsewhere, paste a
 server's invite link in Settings → Office → Online server. To host your own server, see [SERVER.md](SERVER.md).

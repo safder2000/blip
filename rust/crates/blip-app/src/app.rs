@@ -44,6 +44,43 @@ struct MenuWin {
     btn_was: bool,
 }
 
+/// A coin lying on the taskbar.
+struct CoinWin {
+    win: Overlay,
+    /// centre, screen x
+    x: f64,
+    uid: u64,
+    /// the pet goes for it after this (app time)
+    pick_at: f64,
+    gone_at: Option<f64>,
+}
+
+/// The coin's little window: `t` 0 = lying there, up to 1 = lifting and fading as it's picked up.
+fn coin_canvas(p: i32, t: f64) -> Canvas {
+    let mut cv = Canvas::new(8 * p, 8 * p);
+    let lift = (t * 3.0 * p as f64) as i32;
+    for (y, row) in blip_pet::sprites::COIN.iter().enumerate() {
+        for (x, ch) in row.chars().enumerate() {
+            let Some(c) = blip_pet::sprites::coin_color(ch) else { continue };
+            let h = ((x * 37 + y * 61 + 11) % 97) as f64 / 97.0;
+            if h < t * 1.4 {
+                continue;
+            }
+            let (cx, cy) = ((x as i32 + 1) * p, (y as i32 + 2) * p - lift);
+            cv.rect(cx, cy, cx + p, cy + p, c);
+        }
+    }
+    if t > 0.0 {
+        let k = if t < 0.5 { t * 2.0 } else { 2.0 - t * 2.0 };
+        if k > 0.3 {
+            for (sx, sy) in [(0, 1), (7, 2)] {
+                cv.rect(sx * p, sy * p, sx * p + p, sy * p + p, 0xfff1a8);
+            }
+        }
+    }
+    cv
+}
+
 struct PoopWin {
     win: Overlay,
     x: f64,
@@ -77,6 +114,14 @@ pub struct App {
     menu: Option<MenuWin>,
     pub cards: CardStack,
     poops: Vec<PoopWin>,
+    coins_floor: Vec<CoinWin>,
+    next_coin_uid: u64,
+    /// the coin the pet is walking over to
+    walking_to: Option<u64>,
+    /// coins (and a find) waiting for the dig animation to finish
+    pending_dig: Option<(u64, Option<&'static str>)>,
+    /// (next check, a fullscreen app / presentation is in front)
+    busy_check: (f64, bool),
     parts: Vec<Particle>,
     bubble: Option<(String, Option<&'static str>, f64)>,
     board: Option<(String, f64)>,
@@ -120,7 +165,7 @@ fn look_of(pet: &Pet) -> Look {
         "adult" => Stage::Adult,
         _ => Stage::Baby,
     };
-    Look { species: pet.species().to_string(), palette: pet.palette(), stage }
+    Look { species: pet.species().to_string(), palette: pet.palette(), stage, wear: pet.wearing(), pick: pet.pick() }
 }
 
 impl App {
@@ -159,6 +204,11 @@ impl App {
             menu: None,
             cards: CardStack::default(),
             poops: vec![],
+            coins_floor: vec![],
+            next_coin_uid: 0,
+            walking_to: None,
+            pending_dig: None,
+            busy_check: (0.0, false),
             parts: vec![],
             bubble: None,
             board: None,
@@ -374,11 +424,13 @@ impl App {
             self.next_anim = now + ANIM;
         }
         if now >= self.next_sim {
+            self.update_earn_ok(now);
             self.sim(el, now);
             self.next_sim = now + 1.0;
         }
         self.draw_pet(now);
         self.poop_tick(now);
+        self.coin_tick(now);
         self.menu_tick(now);
         let anchor = (
             self.body.ring_target.unwrap_or(self.body.x) + self.geo.w as f64 / 2.0,
@@ -455,6 +507,9 @@ impl App {
         self.body.slow = self.pet.b("sick");
         let before = self.body.action;
         self.body.step(&self.geo, &self.work, t);
+        if self.pending_dig.is_some() && self.body.action != Action::Dig {
+            self.finish_dig();
+        }
         if before != Action::Unfold && self.body.action == Action::Unfold {
             crate::log(&format!("landing {:?} for {}", self.body.landing, self.pet.species()));
             // the proud one pops out of its ball its species' way; the others have their own bits
@@ -605,6 +660,8 @@ impl App {
                     });
                 }
                 Ev::Hatched => self.body.set(Action::Idle, 2.0, now),
+                Ev::CoinFound => self.coin_found(el),
+                Ev::Dig { coins, find } => self.start_dig(coins, find, now),
                 Ev::Grew => {}
             }
         }
@@ -695,6 +752,159 @@ impl App {
             }
             self.poops.push(PoopWin { win: w, x: px, gone_at: None });
         }
+    }
+
+    // ------------------------------------------------ coins (docs/coins.md)
+    /// Coins can come right now: the feature is on, someone is at the PC, nothing fullscreen,
+    /// no call, not on do-not-disturb. Checked once a second, before the pet's simulation.
+    fn update_earn_ok(&mut self, now: f64) {
+        if now >= self.busy_check.0 {
+            self.busy_check = (now + 5.0, platform::fullscreen_busy());
+        }
+        let away = platform::idle_secs() > 300.0;
+        self.pet.earn_ok = self.coins_on() && !away && !self.busy_check.1 && !self.cfg.bool("dnd") && !crate::office::in_call(self);
+    }
+
+    pub fn coins_on(&self) -> bool {
+        self.cfg.v.get("coins").and_then(Value::as_bool).unwrap_or(true)
+    }
+
+    /// The pet found a coin: it lands on the taskbar next to it (at most 2 lie around; more go
+    /// straight to the wallet).
+    fn coin_found(&mut self, el: &ActiveEventLoop) {
+        if !self.coins_on() {
+            return;
+        }
+        if self.coins_floor.iter().filter(|c| c.gone_at.is_none()).count() >= 2 || !self.visible() {
+            self.pet.add_coins(1);
+            self.spawn("coin", 1);
+            return;
+        }
+        let s = self.geo.s;
+        let center = self.body.x + self.geo.w as f64 / 2.0;
+        let off = (18.0 + self.pet.rng.f() * 16.0) * s;
+        let side = if self.pet.rng.f() < 0.5 { -1.0 } else { 1.0 };
+        let (work, _) = platform::work_area_at(center, self.work.bottom - 2.0);
+        let x = (center + side * off).clamp(work.left + 24.0 * s, work.right - 24.0 * s);
+        let cv = coin_canvas(self.geo.p, 0.0);
+        let (wx, wy) = ((x - cv.w as f64 / 2.0) as i32, work.bottom as i32 - cv.h);
+        if let Some(mut w) = Overlay::new(el, cv.w, cv.h, wx, wy, true) {
+            w.present(&cv, wx, wy);
+            let now = self.now();
+            self.next_coin_uid += 1;
+            let pick_at = now + 20.0 + self.pet.rng.f() * 40.0;
+            crate::log(&format!("coin dropped at {x:.0}"));
+            self.coins_floor.push(CoinWin { win: w, x, uid: self.next_coin_uid, pick_at, gone_at: None });
+        }
+    }
+
+    /// A coin on the taskbar is picked up (by the pet walking over, or a click).
+    fn collect_coin(&mut self, i: usize, by_pet: bool) {
+        if self.coins_floor[i].gone_at.is_some() {
+            return;
+        }
+        let now = self.now();
+        self.coins_floor[i].gone_at = Some(now);
+        self.pet.add_coins(1);
+        crate::log(&format!("coin collected by {}", if by_pet { "pet" } else { "click" }));
+        if by_pet {
+            self.spawn("coin", 1);
+        } else {
+            self.play_sound("pop", false);
+        }
+        self.menu_dirty();
+    }
+
+    /// Coins on the taskbar: the pet wanders over to pick them up; picked-up ones lift and fade.
+    fn coin_tick(&mut self, now: f64) {
+        // off (or hidden): whatever lies around goes to the wallet quietly
+        if !self.coins_on() || !self.visible() {
+            let n = self.coins_floor.iter().filter(|c| c.gone_at.is_none()).count() as u64;
+            if n > 0 {
+                self.pet.add_coins(n);
+            }
+            self.coins_floor.clear();
+            self.walking_to = None;
+            return;
+        }
+        // arrived at a coin
+        if std::mem::take(&mut self.body.arrived) {
+            if let Some(uid) = self.walking_to.take() {
+                if let Some(i) = self.coins_floor.iter().position(|c| c.uid == uid) {
+                    self.collect_coin(i, true);
+                }
+            }
+        }
+        // the walk got interrupted (grabbed, eating, asleep...)
+        if self.walking_to.is_some() && self.body.action != Action::Walk {
+            self.walking_to = None;
+            self.body.goal = None;
+        }
+        // go and pick one up
+        let free = matches!(self.body.action, Action::Idle | Action::Walk) && !self.body.airborne && self.body.goal.is_none();
+        if self.walking_to.is_none() && free && self.pet.hatched() && !self.pet.asleep() && !self.pet.gone() {
+            if let Some(c) = self.coins_floor.iter().find(|c| c.gone_at.is_none() && now >= c.pick_at) {
+                let (lo, hi) = Body::bounds(&self.geo, &self.work);
+                self.body.goal = Some((c.x - self.geo.w as f64 / 2.0).clamp(lo, hi));
+                self.walking_to = Some(c.uid);
+                self.body.set(Action::Walk, 30.0, now);
+            }
+        }
+        // picked-up coins: rise and fade for a moment, then go
+        const DUR: f64 = 0.5;
+        let p = self.geo.p;
+        let mut i = 0;
+        while i < self.coins_floor.len() {
+            let Some(t0) = self.coins_floor[i].gone_at else {
+                i += 1;
+                continue;
+            };
+            let t = (now - t0) / DUR;
+            if t >= 1.0 {
+                self.coins_floor.remove(i);
+                continue;
+            }
+            let cv = coin_canvas(p, t);
+            let c = &mut self.coins_floor[i];
+            let (x, y) = (c.win.x, c.win.y);
+            c.win.present(&cv, x, y);
+            i += 1;
+        }
+    }
+
+    /// Time to dig: swing the pickaxe for a few seconds where it stands, then the coins go to
+    /// the wallet. If it can't dig right now (in the air, eating...), they go in quietly.
+    fn start_dig(&mut self, coins: u64, find: Option<&'static str>, now: f64) {
+        if !self.coins_on() {
+            return;
+        }
+        let can = matches!(self.body.action, Action::Idle | Action::Walk) && !self.body.airborne && self.visible() && self.walking_to.is_none();
+        self.pending_dig = Some((coins, find));
+        if can {
+            self.body.goal = None;
+            self.body.set(Action::Dig, 3.0, now);
+            crate::log(&format!("dig starts: {coins} coins, find {find:?}"));
+        } else {
+            crate::log(&format!("dig without the swing: action {:?} airborne {}", self.body.action, self.body.airborne));
+            self.finish_dig();
+        }
+    }
+
+    fn finish_dig(&mut self) {
+        let Some((coins, find)) = self.pending_dig.take() else { return };
+        self.pet.add_coins(coins);
+        self.spawn("coin", (1 + coins / 3).min(3) as u32);
+        crate::log(&format!("dig done: +{coins}, wallet {}", self.pet.coins()));
+        if let Some(f) = find {
+            self.pet.add_find(f);
+            self.board(&format!("Found: {}!", blip_core::coins::find_name(f)), 4.0);
+            self.chirp("wow", None, 2.5);
+        }
+        self.menu_dirty();
+    }
+
+    fn menu_dirty(&mut self) {
+        self.windows_dirty = true;
     }
 
     /// Poops being picked up: rise, dissolve and sparkle for half a second, then go.
@@ -884,6 +1094,8 @@ impl App {
                 _ => "normal".into(),
             },
             bars: vec![("meal", pet.stat("full"), 0xf0a020), ("play", pet.stat("happy"), 0xef5b8b), ("moon", pet.stat("energy"), 0x6b7fd7)],
+            wear: if pet.stage() == "egg" { vec![] } else { pet.wearing() },
+            coins: self.coins_on().then(|| pet.coins()),
         };
         let mut care = vec![];
         if self.cfg.menu_on("care") {
@@ -892,11 +1104,14 @@ impl App {
             care = vec![
                 b("meal", "Feed".into(), "care:meal", hatched),
                 b("snack", "Snack".into(), "care:snack", hatched),
-                b("play", "Play".into(), "care:play", hatched),
                 b("clean", if n > 0 { format!("Clean ({n})") } else { "Clean".into() }, "care:clean", alive),
                 b("pill", "Meds".into(), "care:meds", hatched),
                 b("moon", if pet.asleep() { "Wake".into() } else { "Sleep".into() }, "care:sleep", hatched),
             ];
+            // playing is throwing and petting it for real; the Play button's place is the shop
+            if self.coins_on() {
+                care.push(b("shop", "Shop".into(), "window:shop", true));
+            }
         }
         let mut items = vec![];
         if self.cfg.menu_on("notes") {
@@ -974,6 +1189,20 @@ impl App {
         Some(w.inner_size())
     }
 
+    /// Run the pet's queued events that don't need the event loop (sounds, chirps, sparkles).
+    pub fn flush_pet_events(&mut self) {
+        let now = self.now();
+        for ev in std::mem::take(&mut self.pet.events) {
+            match ev {
+                Ev::Chirp { mood, icon, secs } => self.chirp(mood, icon, secs),
+                Ev::Spawn(k, n) => self.spawn(k, n),
+                Ev::Sound(name) => self.play_sound(name, false),
+                Ev::Happy(secs) => self.body.happy_until = now + secs,
+                other => self.pet.events.push(other),
+            }
+        }
+    }
+
     pub fn open_menu(&mut self, el: &ActiveEventLoop, at_x: f64, at_y: f64) {
         crate::log(&format!("menu opens at {at_x},{at_y}"));
         self.open_menu_kind(el, at_x, at_y, "main");
@@ -981,6 +1210,11 @@ impl App {
 
     fn open_menu_kind(&mut self, el: &ActiveEventLoop, at_x: f64, at_y: f64, kind: &str) {
         self.menu = None;
+        if !self.cfg.bool("play_hint") && self.pet.hatched() && !self.pet.gone() {
+            self.cfg.set("play_hint", json!(true));
+            self.save();
+            self.board("Pat me or throw me to play!", 5.0);
+        }
         let menu = self.build_menu(kind);
         let (w, h) = menu.size();
         let (work, _) = platform::work_area_at(at_x, at_y);
@@ -1046,6 +1280,16 @@ impl App {
             let outs = self.cards.event(id, &event);
             for CardOut::Run(cmd) in outs {
                 self.run(el, &cmd);
+            }
+            return;
+        }
+        if let Some(i) = self.coins_floor.iter().position(|c| c.win.id() == id) {
+            if let WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. } = event {
+                if self.walking_to == Some(self.coins_floor[i].uid) {
+                    self.walking_to = None;
+                    self.body.goal = None;
+                }
+                self.collect_coin(i, false);
             }
             return;
         }
@@ -1356,6 +1600,23 @@ impl App {
             "poop" => {
                 self.pet.events.push(Ev::Poop);
                 self.flush_events(el);
+            }
+            "coin" => {
+                self.pet.events.push(Ev::CoinFound);
+                self.flush_events(el);
+            }
+            "dig" => {
+                self.pet.events.push(Ev::Dig { coins: 5, find: Some("fossil") });
+                self.flush_events(el);
+            }
+            "coins:due" => self.pet.coins_due_now(),
+            "net:log" => {
+                let peers: Vec<String> = crate::office::peers(self).iter().map(|p| format!("{}({}, owns {:?})", p.name, p.id, p.owned)).collect();
+                crate::log(&format!("net: {} | server {:?} | peers {peers:?}", crate::office::status(self).0, crate::office::server_status(self)));
+            }
+            w if w.starts_with("coins:add:") => {
+                let n: u64 = w["coins:add:".len()..].parse().unwrap_or(0);
+                self.pet.add_coins(n);
             }
             other => self.run(el, other),
         }

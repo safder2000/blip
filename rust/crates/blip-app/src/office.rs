@@ -41,6 +41,10 @@ pub struct Office {
     restart_at: Option<f64>,
     profile_sig: String,
     next_profile: f64,
+    /// swaps offered to others: id -> (peer, give, get, sent at)
+    trades_out: HashMap<String, (String, String, String, f64)>,
+    /// swaps offered to us: id -> (peer, they give, they want)
+    trades_in: HashMap<String, (String, String, String)>,
 }
 
 impl Office {
@@ -59,6 +63,8 @@ impl Office {
             calls_in: HashMap::new(),
             restart_at: None,
             profile_sig: String::new(),
+            trades_out: HashMap::new(),
+            trades_in: HashMap::new(),
             next_profile: 0.0,
         }
     }
@@ -75,7 +81,15 @@ fn profile(app: &App) -> Map<String, Value> {
         "opus": crate::voice::opus_ok(),
         "ver": crate::windows::VERSION,
     });
-    m.as_object().cloned().unwrap_or_default()
+    let mut m = m.as_object().cloned().unwrap_or_default();
+    // what the pet wears and owns, so buddies see it (never any counts of coins or time)
+    if app.coins_on() && app.cfg.v.get("share_things").and_then(Value::as_bool).unwrap_or(true) {
+        m.insert("wear".into(), json!(app.pet.wearing()));
+        m.insert("owned".into(), json!(app.pet.owned()));
+        m.insert("pick".into(), json!(app.pet.pick()));
+        m.insert("finds".into(), json!(app.pet.finds().len()));
+    }
+    m
 }
 
 /// Start (or restart) the network from the settings.
@@ -112,6 +126,7 @@ pub fn tick(app: &mut App, el: &ActiveEventLoop) {
     }
     if now >= app.office.next_profile {
         app.office.next_profile = now + 1.0;
+        expire_trades(app);
         let p = profile(app);
         let sig = Value::Object(p.clone()).to_string();
         if sig != app.office.profile_sig {
@@ -275,6 +290,14 @@ fn cheer(app: &mut App) {
 }
 
 pub fn run(app: &mut App, el: &ActiveEventLoop, cmd: &str) {
+    if let Some(rest) = cmd.strip_prefix("trade:offer:") {
+        // trade:offer:<peer>:<give>:<get> (peer ids have no ':')
+        let p: Vec<&str> = rest.split(':').collect();
+        if let [pid, give, get] = p.as_slice() {
+            offer_trade(app, pid, give, get);
+        }
+        return;
+    }
     let parts: Vec<&str> = cmd.splitn(3, ':').collect();
     match parts.as_slice() {
         ["net", "rescan"] => {
@@ -297,6 +320,16 @@ pub fn run(app: &mut App, el: &ActiveEventLoop, cmd: &str) {
             }
         }
         ["msg", pid, text] => send_msg(app, pid, text),
+        ["trade", "accept", "all"] => {
+            // test hook (BLIP_DEMO): say yes to every pending offer
+            let ids: Vec<String> = app.office.trades_in.keys().cloned().collect();
+            for tid in ids {
+                app.cards.remove(&format!("trade:{tid}"));
+                answer_trade(app, &tid, true);
+            }
+        }
+        ["trade", "accept", tid] => answer_trade(app, tid, true),
+        ["trade", "decline", tid] => answer_trade(app, tid, false),
         ["out-closed", cid, why] => {
             if let Some((pid, name)) = app.office.calls_out.remove(*cid) {
                 if matches!(*why, "button" | "x" | "timeout") {
@@ -437,6 +470,7 @@ fn on_message(app: &mut App, el: &ActiveEventLoop, d: Map<String, Value>) {
             let text: String = body.get("text").and_then(Value::as_str).unwrap_or("").chars().take(500).collect();
             incoming_msg(app, el, &src, &name, &text);
         }
+        "trade" | "trade_ok" | "trade_no" => trade_message(app, el, &kind, &src, &name, &body),
         _ => {}
     }
 }
@@ -521,3 +555,89 @@ pub fn basecamp_page(ui: &mut Ui, t: &Theme, app: &mut App, el: &ActiveEventLoop
     crate::basecamp::settings_page(ui, t, app, el, tok, id, secret, morning);
 }
 
+
+
+// ------------------------------------------------ swapping wearables with a buddy (docs/coins.md)
+fn item_name(id: &str) -> &'static str {
+    blip_core::coins::item(id).map(|i| i.name).unwrap_or("something")
+}
+
+/// Offer one of our wearables for one of theirs. Nothing is given away: they have to agree.
+fn offer_trade(app: &mut App, pid: &str, give: &str, get: &str) {
+    use blip_core::coins::tradeable;
+    if !tradeable(give) || !tradeable(get) || !app.pet.owns(give) || app.pet.owns(get) {
+        app.board("Can't swap that", 3.0);
+        return;
+    }
+    if app.office.trades_out.values().any(|t| t.1 == give) {
+        app.board("Already offered that one", 3.0);
+        return;
+    }
+    let tid = format!("{:x}", (blip_core::now() * 1000.0) as u64 ^ (app.pet.rng.f() * 1e9) as u64);
+    send(app, pid, "trade", json!({"trade_id": tid, "give": give, "want": get}));
+    app.office.trades_out.insert(tid, (pid.to_string(), give.to_string(), get.to_string(), blip_core::now()));
+    let name = name_of(app, pid);
+    app.board(&format!("Swap offer sent to {name}"), 3.0);
+}
+
+fn answer_trade(app: &mut App, tid: &str, yes: bool) {
+    let Some((src, give, want)) = app.office.trades_in.remove(tid) else { return };
+    // they give `give`, we give `want`
+    if yes && app.pet.swap_item(&want, &give) {
+        send(app, &src, "trade_ok", json!({"trade_id": tid}));
+        app.board(&format!("Swapped! New: {}", item_name(&give)), 4.0);
+        app.windows_dirty = true;
+        crate::office::profile_changed(app);
+    } else {
+        send(app, &src, "trade_no", json!({"trade_id": tid}));
+    }
+}
+
+fn trade_message(app: &mut App, el: &ActiveEventLoop, kind: &str, src: &str, name: &str, body: &Map<String, Value>) {
+    use blip_core::coins::tradeable;
+    let tid: String = body.get("trade_id").and_then(Value::as_str).unwrap_or("").chars().take(40).collect();
+    if tid.is_empty() {
+        return;
+    }
+    match kind {
+        "trade" => {
+            let give = body.get("give").and_then(Value::as_str).unwrap_or("").to_string();
+            let want = body.get("want").and_then(Value::as_str).unwrap_or("").to_string();
+            let ok = app.coins_on() && tradeable(&give) && tradeable(&want) && app.pet.owns(&want) && !app.pet.owns(&give) && app.office.trades_in.len() < 5;
+            if !ok {
+                send(app, src, "trade_no", json!({"trade_id": tid}));
+                return;
+            }
+            let text = format!("{name} wants to swap their {} for your {}.", item_name(&give), item_name(&want));
+            app.office.trades_in.insert(tid.clone(), (src.to_string(), give, want));
+            card(app, el, &format!("trade:{tid}"), "Swap?", &text, vec![("Swap", format!("trade:accept:{tid}")), ("No thanks", format!("trade:decline:{tid}"))], Some(300.0), &format!("trade:decline:{tid}"), "gift", "msg");
+        }
+        "trade_ok" => {
+            if let Some((pid, give, get, _)) = app.office.trades_out.remove(&tid) {
+                if pid == src && app.pet.swap_item(&give, &get) {
+                    app.board(&format!("Swapped with {name}! New: {}", item_name(&get)), 4.0);
+                    app.windows_dirty = true;
+                    profile_changed(app);
+                }
+            }
+        }
+        _ => {
+            if let Some((pid, _, get, _)) = app.office.trades_out.remove(&tid) {
+                if pid == src {
+                    app.board(&format!("{name} kept their {}", item_name(&get)), 3.0);
+                }
+            }
+        }
+    }
+}
+
+/// Offers nobody answered lapse after a few minutes.
+pub fn expire_trades(app: &mut App) {
+    let now = blip_core::now();
+    app.office.trades_out.retain(|_, t| now - t.3 < 330.0);
+}
+
+/// Re-announce soon (what the pet wears changed).
+pub fn profile_changed(app: &mut App) {
+    app.office.next_profile = 0.0;
+}

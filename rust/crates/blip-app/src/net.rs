@@ -33,6 +33,11 @@ pub struct Peer {
     pub palette: String,
     pub species: String,
     pub ver: String,
+    /// what their pet wears and owns (wearables), its pickaxe tier and how many different finds
+    pub wear: Vec<String>,
+    pub owned: Vec<String>,
+    pub pick: u8,
+    pub finds: u32,
     pub port: u16,
     pub seen: f64,
     pub voice: bool,
@@ -421,6 +426,15 @@ fn handle(sh: &Shared, d: Map<String, Value>, ip: Option<String>, via: &str, key
             p.palette = s(body.get("palette"));
             p.species = s(body.get("species"));
             p.ver = s(body.get("ver"));
+            let ids = |v: Option<&Value>| -> Vec<String> {
+                v.and_then(Value::as_array)
+                    .map(|a| a.iter().filter_map(Value::as_str).filter(|x| blip_core::coins::item(x).is_some()).take(16).map(str::to_string).collect())
+                    .unwrap_or_default()
+            };
+            p.wear = ids(body.get("wear"));
+            p.owned = ids(body.get("owned"));
+            p.pick = body.get("pick").and_then(Value::as_u64).unwrap_or(0).min(4) as u8;
+            p.finds = body.get("finds").and_then(Value::as_u64).unwrap_or(0).min(99) as u32;
             p.port = body.get("port").and_then(Value::as_u64).filter(|v| *v > 0 && *v < 65536).unwrap_or(TCP_PORT as u64) as u16;
             p.seen = now();
             p.voice = body.get("voice").and_then(Value::as_bool).unwrap_or(false);

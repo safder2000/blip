@@ -146,7 +146,7 @@ fn walking_stays_on_screen() {
 #[test]
 fn sprites_for_every_state_draw() {
     let geo = Geo::new(1.5);
-    let look = Look { species: "bunny".into(), palette: "peach".into(), stage: Stage::Child };
+    let look = Look { species: "bunny".into(), palette: "peach".into(), stage: Stage::Child, wear: vec!["crown".into(), "shades".into()], pick: 0 };
     let mut b = Body::new(500.0, 200.0, 5);
     for chute in [0, 7] {
         b.chute = chute;

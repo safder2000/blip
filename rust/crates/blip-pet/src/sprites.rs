@@ -678,3 +678,226 @@ pub fn chute_style(roll: u32) -> u8 {
     }
     0
 }
+
+// ---------------------------------------------------------------- things it wears (docs/coins.md)
+/// Where the face and the top of the head are for a look (same maths as `build_pet`).
+struct FaceGeo {
+    /// left / right eye column, eye row, eye height
+    l: i32,
+    r: i32,
+    ey: i32,
+    eh: i32,
+    /// first row of the head (not the ears), and the head's half width
+    top: i32,
+    rx: f64,
+    f: i32,
+}
+
+fn face_geo(look: &PetLook) -> FaceGeo {
+    let (mut rx, mut ry) = match look.stage {
+        Stage::Baby => (5.0, 4.5),
+        Stage::Child => (7.0, 6.0),
+        Stage::Adult => (9.0, 7.5),
+    };
+    if look.squash {
+        rx += 0.7;
+        ry -= 0.8;
+    }
+    let cx = GW as f64 / 2.0;
+    let cy = (GH - 1) as f64 - ry;
+    let shape = ellipse(cx, cy, rx, ry);
+    let top = shape.iter().map(|p| p.1).min().unwrap_or(0);
+    let f = look.facing.signum();
+    let d = 3.max(int(rx * 0.45));
+    let ey = int(cy - ry * 0.15);
+    let eh = if look.stage == Stage::Baby { 1 } else { 2 };
+    FaceGeo { l: 16 - d + f, r: 15 + d + f, ey, eh, top, rx, f }
+}
+
+/// Put cells on (over whatever is there) and outline them where they touch nothing.
+fn put_outlined(g: &mut Sprite, cells: &[(Cell, Color)]) {
+    let mine: Shape = cells.iter().map(|c| c.0).collect();
+    for &(p, c) in cells {
+        g.insert(p, c);
+    }
+    for &p in &mine {
+        for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+            let n = (p.0 + dx, p.1 + dy);
+            if !mine.contains(&n) && !g.contains_key(&n) && (0..GW).contains(&n.0) {
+                g.insert(n, col::OUT);
+            }
+        }
+    }
+}
+
+/// Draw what the pet wears (`head` / `face` item ids from blip_core::coins) onto a pet sprite.
+pub fn add_wear(g: &mut Sprite, look: &PetLook, wear: &[String]) {
+    if wear.is_empty() {
+        return;
+    }
+    let fg = face_geo(look);
+    let cx = 16 + fg.f; // the head's middle columns are cx-1 and cx
+    for id in wear {
+        match id.as_str() {
+            "shades" => {
+                // big dark lenses over the eyes (4 wide, one row taller), a shine and a bridge
+                let dark = 0x14141c;
+                let h = fg.eh.max(1);
+                let mut cells = vec![];
+                for (ex, out) in [(fg.l, -1), (fg.r, 1)] {
+                    let (x0, x1) = if out < 0 { (ex - 2, ex + 1) } else { (ex - 1, ex + 2) };
+                    for x in x0..=x1 {
+                        for y in fg.ey - 1..fg.ey + h {
+                            cells.push(((x, y), dark));
+                        }
+                    }
+                    cells.push(((x0 + 1, fg.ey - 1), 0xa9c4ff));
+                }
+                for x in fg.l + 2..fg.r - 1 {
+                    cells.push(((x, fg.ey - 1), dark));
+                }
+                for (p, c) in cells {
+                    g.insert(p, c);
+                }
+            }
+            "specs" => {
+                let rim = 0x3a3550;
+                let h = fg.eh.max(1);
+                for ex in [fg.l, fg.r] {
+                    for y in fg.ey - 1..=fg.ey + h {
+                        for x in [ex - 2, ex + 2] {
+                            if y > fg.ey - 1 && y < fg.ey + h {
+                                g.insert((x, y), rim);
+                            }
+                        }
+                    }
+                    for x in ex - 1..=ex + 1 {
+                        g.insert((x, fg.ey - 1), rim);
+                        g.insert((x, fg.ey + h), rim);
+                    }
+                }
+                for x in fg.l + 3..fg.r - 2 {
+                    g.insert((x, fg.ey), rim);
+                }
+            }
+            "party" => {
+                let (a, b) = (0x4ba3ff, 0xffd23f);
+                let mut cells = vec![];
+                for (i, hw) in [0, 0, 1, 1, 2].iter().enumerate() {
+                    let y = fg.top - 5 + i as i32;
+                    for x in cx - 1 - hw..=cx + hw {
+                        cells.push(((x, y), if (i + (x - cx).unsigned_abs() as usize) % 3 == 0 { b } else { a }));
+                    }
+                }
+                cells.push(((cx - 1, fg.top - 6), 0xffffff));
+                cells.push(((cx, fg.top - 6), 0xffffff));
+                put_outlined(g, &cells);
+            }
+            "hardhat" => {
+                let (y1, y2, rim) = (0xff9f1c, 0xe07f00, 0xb86200);
+                let w = (fg.rx * 0.75).round() as i32;
+                let mut cells = vec![];
+                for (i, hw) in [w - 2, w - 1, w].iter().enumerate() {
+                    let y = fg.top - 3 + i as i32;
+                    for x in cx - 1 - hw..=cx + hw {
+                        cells.push(((x, y), if i == 0 && x == cx - 2 { 0xfff1a8 } else if x > cx + hw - 2 { y2 } else { y1 }));
+                    }
+                }
+                for x in cx - 2 - w..=cx + w + 1 {
+                    cells.push(((x, fg.top), rim));
+                }
+                put_outlined(g, &cells);
+            }
+            "flower" => {
+                let fx = cx + (fg.rx * 0.5).round() as i32;
+                let fy = fg.top - 1;
+                let (petal, light) = (0xff6fa5, 0xffb3cf);
+                let mut cells = vec![];
+                for dx in -1..=1 {
+                    for dy in -1..=1 {
+                        let c = if dx == 0 && dy == 0 { 0xffd23f } else if dx != 0 && dy != 0 { light } else { petal };
+                        cells.push(((fx + dx, fy + dy), c));
+                    }
+                }
+                cells.push(((fx - 2, fy + 1), 0x4caf50));
+                put_outlined(g, &cells);
+            }
+            "crown" => {
+                let (gold, dark) = (0xffd23f, 0xd9a520);
+                let w = 4;
+                let mut cells = vec![];
+                for x in cx - 1 - w..=cx + w {
+                    cells.push(((x, fg.top - 1), dark));
+                    cells.push(((x, fg.top - 2), gold));
+                }
+                for x in [cx - 1 - w, cx - 1 - w / 2, cx - 1, cx, cx + w / 2, cx + w] {
+                    cells.push(((x, fg.top - 3), gold));
+                }
+                for x in [cx - 1 - w, cx - 1, cx, cx + w] {
+                    cells.push(((x, fg.top - 4), gold));
+                }
+                cells.push(((cx - 1, fg.top - 2), 0xff4d6d));
+                cells.push(((cx, fg.top - 2), 0xff4d6d));
+                put_outlined(g, &cells);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Head colour of each pickaxe tier.
+pub fn pick_color(tier: u8) -> Color {
+    match tier {
+        1 => 0xb98a52,
+        2 => 0x9aa0a8,
+        3 => 0xffd23f,
+        _ => 0x6ff0ff,
+    }
+}
+
+/// The pickaxe in the pet's paws while it digs: `up` = raised, else swung down in front.
+pub fn add_pickaxe(g: &mut Sprite, look: &PetLook, tier: u8, up: bool) {
+    let fg = face_geo(look);
+    let side = if look.facing < 0 { -1 } else { 1 };
+    let (handle, head) = (0x8a5a2b, pick_color(tier));
+    let hx = 16 + side * (fg.rx as i32 + 1) - if side > 0 { 1 } else { 0 };
+    let hy = GH - 4;
+    let mut cells = vec![];
+    if up {
+        // raised over the shoulder: a long handle up and out, the head across its top
+        for k in 0..7 {
+            cells.push(((hx + side * (k / 3), hy - k), handle));
+        }
+        let (tx, ty) = (hx + side * 2, hy - 7);
+        for dx in -2..=2 {
+            cells.push(((tx + dx, ty), head));
+        }
+        cells.push(((tx - 3, ty + 1), head));
+        cells.push(((tx + 3, ty + 1), head));
+    } else {
+        // swung down: the handle reaches out in front, the head bites into the ground
+        for k in 0..6 {
+            cells.push(((hx + side * k, hy - 2 + k / 3), handle));
+        }
+        let tx = hx + side * 6;
+        for dy in -3..=1 {
+            cells.push(((tx, hy + dy), head));
+        }
+        cells.push(((tx - side, hy - 4), head));
+        cells.push(((tx + side, hy + 2), head));
+    }
+    let cells: Vec<_> = cells.into_iter().filter(|((x, y), _)| (0..GW).contains(x) && *y < GH).collect();
+    put_outlined(g, &cells);
+}
+
+/// A coin lying on the taskbar: rows of '.', 'o' (outline), 'y' (gold), 'd' (dark gold), 'w' (shine).
+pub const COIN: [&str; 6] = [".oooo.", "oywyyo", "oyyydo", "oyyydo", "oyddyo", ".oooo."];
+pub fn coin_color(ch: char) -> Option<Color> {
+    match ch {
+        'o' => Some(0x7a4f10),
+        'y' => Some(0xffd23f),
+        'd' => Some(0xe0a020),
+        'w' => Some(0xfff6c8),
+        _ => None,
+    }
+}

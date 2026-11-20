@@ -4,6 +4,7 @@
 //! switching keeps everyone's pet, timers and notes.
 
 pub mod clock;
+pub mod coins;
 pub mod config;
 pub mod cry;
 pub mod notes;

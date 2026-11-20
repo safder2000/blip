@@ -24,6 +24,10 @@ pub struct PetCard {
     pub mood: String,
     /// (icon, 0..=100, colour)
     pub bars: Vec<(&'static str, f64, Color)>,
+    /// what it wears, drawn on the little pet
+    pub wear: Vec<String>,
+    /// the wallet, shown at the top right (None: coins are off)
+    pub coins: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -276,7 +280,7 @@ impl Menu {
             let g = if card.stage == "egg" {
                 build_egg(1, 0.5)
             } else {
-                build_pet(&PetLook {
+                let look = PetLook {
                     stage: Stage::from_name(&card.stage),
                     palette: &card.palette,
                     mood: &card.mood,
@@ -285,7 +289,10 @@ impl Menu {
                     squash: false,
                     blink: false,
                     species: &card.species,
-                })
+                };
+                let mut g = build_pet(&look);
+                blip_pet::sprites::add_wear(&mut g, &look, &card.wear);
+                g
             };
             let (bx, by, bw, bh) = sprite_bounds(&g);
             let sp = 1.max(sc(s, 1.6));
@@ -294,15 +301,29 @@ impl Menu {
             cv.sprite(&g, ax - bx * sp, ay - by * sp, sp);
             let tx = x0 + sc(s, 60.0);
             fonts.draw(cv, tx, y0 + sc(s, 14.0), &card.name, fs(BODY), true, t.ink);
+            if let Some(n) = card.coins {
+                // the wallet, quietly in the corner
+                let txt = n.to_string();
+                let tw = fonts.measure(&txt, fs(TINY), true);
+                let ip = 1.max(sc(s, 1.0));
+                let right = x1 - sc(s, 10.0);
+                fonts.draw(cv, right - tw, y0 + sc(s, 14.0), &txt, fs(TINY), true, t.muted);
+                cv.icon(right - tw - 5 * ip - sc(s, 4.0), y0 + sc(s, 14.0) - 7 * ip / 2, "coin", ip, 0xe0a020);
+            }
             fonts.draw(cv, tx, y0 + sc(s, 31.0), &card.status, fs(TINY), false, t.muted);
             let gap = sc(s, 5.0);
             let n = card.bars.len().max(1) as i32;
             let bw = (x1 - tx - sc(s, 10.0) - (n - 1) * gap) / n;
             let by = y0 + sc(s, 44.0);
-            for (k, (_, v, c)) in card.bars.iter().enumerate() {
-                let bx = tx + k as i32 * (bw + gap);
-                cv.rect(bx, by, bx + bw, by + sc(s, 5.0), t.track);
-                cv.rect(bx, by, bx + (bw as f64 * v.clamp(0.0, 100.0) / 100.0) as i32, by + sc(s, 5.0), *c);
+            let ip = 1.max(sc(s, 1.0));
+            let iw = 5 * ip + sc(s, 3.0);
+            for (k, (icon, v, c)) in card.bars.iter().enumerate() {
+                // a tiny icon says which bar is which: Food, Fun, Energy
+                let ix = tx + k as i32 * (bw + gap);
+                cv.icon(ix, by + sc(s, 2.5) - 7 * ip / 2, icon, ip, *c);
+                let (bx, bw2) = (ix + iw, bw - iw);
+                cv.rect(bx, by, bx + bw2, by + sc(s, 5.0), t.track);
+                cv.rect(bx, by, bx + (bw2 as f64 * v.clamp(0.0, 100.0) / 100.0) as i32, by + sc(s, 5.0), *c);
             }
         }
         for (i, &(ax0, ay0, ax1, ay1)) in self.care_rects.iter().enumerate() {
