@@ -1210,11 +1210,6 @@ impl App {
 
     fn open_menu_kind(&mut self, el: &ActiveEventLoop, at_x: f64, at_y: f64, kind: &str) {
         self.menu = None;
-        if !self.cfg.bool("play_hint") && self.pet.hatched() && !self.pet.gone() {
-            self.cfg.set("play_hint", json!(true));
-            self.save();
-            self.board("Pat me or throw me to play!", 5.0);
-        }
         let menu = self.build_menu(kind);
         let (w, h) = menu.size();
         let (work, _) = platform::work_area_at(at_x, at_y);

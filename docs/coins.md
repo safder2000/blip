@@ -77,5 +77,5 @@ offer lapses after 5 minutes. Pickaxes, pills and finds can't be traded (they sh
 ## Also in this update
 
 - The menu's three bars get icons (bowl = Food, ball = Fun, moon = Energy).
-- The **Play** button goes; playing is throwing and petting. Its place becomes **Shop**. The
-  first time the menu opens after the update, the pet says "Pat me or throw me to play!".
+- The **Play** button goes; playing is throwing and petting. Its place becomes **Shop**. The pet
+  never explains itself or gives instructions: people find out by playing.
