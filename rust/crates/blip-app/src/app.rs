@@ -115,6 +115,10 @@ pub struct App {
     pub cards: CardStack,
     poops: Vec<PoopWin>,
     coins_floor: Vec<CoinWin>,
+    pub addons: crate::addons::Addons,
+    /// a game running (its own process), and one waiting for its download
+    game: Option<std::process::Child>,
+    game_wanted: bool,
     next_coin_uid: u64,
     /// the coin the pet is walking over to
     walking_to: Option<u64>,
@@ -205,6 +209,9 @@ impl App {
             cards: CardStack::default(),
             poops: vec![],
             coins_floor: vec![],
+            addons: crate::addons::Addons::new(&dir),
+            game: None,
+            game_wanted: false,
             next_coin_uid: 0,
             walking_to: None,
             pending_dig: None,
@@ -431,6 +438,7 @@ impl App {
         self.draw_pet(now);
         self.poop_tick(now);
         self.coin_tick(now);
+        self.game_tick();
         self.menu_tick(now);
         let anchor = (
             self.body.ring_target.unwrap_or(self.body.x) + self.geo.w as f64 / 2.0,
@@ -669,7 +677,8 @@ impl App {
 
     // ------------------------------------------------ drawing the pet
     fn draw_pet(&mut self, now: f64) {
-        if !self.visible() {
+        // hidden while it's off playing a game (it's the ball there)
+        if !self.visible() || self.game.is_some() {
             if let Some(w) = self.pet_win.as_mut() {
                 w.hide();
             }
@@ -754,6 +763,86 @@ impl App {
         }
     }
 
+    // ------------------------------------------------ games (add-ons, see addons.rs)
+    /// Start Hoops: download it first if needed (it plays as soon as it's here).
+    pub fn play_hoops(&mut self) {
+        if !self.pet.owns("hoops") || self.game.is_some() || !self.pet.hatched() || self.pet.gone() {
+            return;
+        }
+        match self.addons.hoops() {
+            crate::addons::State::Ready => self.launch_hoops(),
+            crate::addons::State::Downloading => self.game_wanted = true,
+            _ => {
+                self.addons.fetch_hoops();
+                self.game_wanted = true;
+            }
+        }
+    }
+
+    fn launch_hoops(&mut self) {
+        let path = self.addons.hoops_path();
+        let (x, y) = (self.body.x + self.geo.w as f64 / 2.0, self.body.y + self.geo.h as f64 / 2.0);
+        let stage = if self.pet.stage() == "egg" { "baby".to_string() } else { self.pet.stage().to_string() };
+        let mut c = std::process::Command::new(&path);
+        c.args(["--species", self.pet.species(), "--palette", &self.pet.palette(), "--stage", &stage])
+            .args(["--wear", &self.pet.wearing().join(","), "--best", &self.pet.hoops_best().to_string(), "--at", &format!("{x:.0},{y:.0}")])
+            .stdout(std::process::Stdio::piped())
+            .stdin(std::process::Stdio::null());
+        if let Ok(extra) = std::env::var("BLIP_HOOPS_ARGS") {
+            c.args(extra.split_whitespace()); // tests: --auto
+        }
+        match c.spawn() {
+            Ok(ch) => {
+                crate::log("hoops started");
+                self.game = Some(ch);
+                self.menu = None;
+            }
+            Err(e) => {
+                crate::log(&format!("hoops didn't start: {e}"));
+                self.addons.remove_hoops();
+            }
+        }
+    }
+
+    /// Start a wanted game once it's downloaded; when one ends, pay out and bring the pet back.
+    fn game_tick(&mut self) {
+        match self.addons.hoops() {
+            crate::addons::State::Ready if self.game_wanted => {
+                self.game_wanted = false;
+                self.launch_hoops();
+            }
+            crate::addons::State::Failed(_) => self.game_wanted = false,
+            _ => {}
+        }
+        let Some(ch) = self.game.as_mut() else { return };
+        if matches!(ch.try_wait(), Ok(None)) {
+            return;
+        }
+        let mut out = String::new();
+        if let Some(mut so) = ch.stdout.take() {
+            use std::io::Read;
+            let _ = so.read_to_string(&mut out);
+        }
+        self.game = None;
+        let score = out
+            .lines()
+            .find_map(|l| serde_json::from_str::<Value>(l).ok())
+            .and_then(|v| v.get("score").and_then(Value::as_u64))
+            .unwrap_or(0)
+            .min(10);
+        let (coins, best) = self.pet.game_over(score, blip_core::now());
+        crate::log(&format!("hoops over: {score} baskets, +{coins} coins, best {}", self.pet.hoops_best()));
+        if best && score > 0 {
+            self.chirp("wow", None, 3.0);
+        } else if score > 0 {
+            self.chirp("happy", None, 2.5);
+        }
+        if coins > 0 {
+            self.spawn("coin", coins.min(3) as u32);
+        }
+        self.windows_dirty = true;
+    }
+
     // ------------------------------------------------ coins (docs/coins.md)
     /// Coins can come right now: the feature is on, someone is at the PC, nothing fullscreen,
     /// no call, not on do-not-disturb. Checked once a second, before the pet's simulation.
@@ -762,7 +851,7 @@ impl App {
             self.busy_check = (now + 5.0, platform::fullscreen_busy());
         }
         let away = platform::idle_secs() > 300.0;
-        self.pet.earn_ok = self.coins_on() && !away && !self.busy_check.1 && !self.cfg.bool("dnd") && !crate::office::in_call(self);
+        self.pet.earn_ok = self.coins_on() && self.game.is_none() && !away && !self.busy_check.1 && !self.cfg.bool("dnd") && !crate::office::in_call(self);
     }
 
     pub fn coins_on(&self) -> bool {
@@ -1152,6 +1241,9 @@ impl App {
         if self.cfg.menu_on("wander") {
             extra.push(Item::toggle("walk", "Wander around", self.body.wander, "wander"));
         }
+        if self.coins_on() && pet.owns("hoops") {
+            extra.push(Item::row("hoop", "Hoops", "game:hoops"));
+        }
         if !extra.is_empty() {
             if !items.is_empty() {
                 items.push(Item::Sep);
@@ -1443,6 +1535,7 @@ impl App {
                     self.want_window.push("newpet".into());
                 }
             }
+            ["game", "hoops"] => self.play_hoops(),
             ["hide"] => self.set_visible(false),
             ["show"] => self.set_visible(true),
             ["quit"] => {
@@ -1618,6 +1711,9 @@ impl App {
     }
 
     pub fn shutdown(&mut self) {
+        if let Some(mut g) = self.game.take() {
+            let _ = g.kill();
+        }
         crate::office::shutdown(self);
         self.save();
     }

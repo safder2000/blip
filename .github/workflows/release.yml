@@ -98,7 +98,12 @@ jobs:
           "$hash  $name" | Out-File -FilePath "$exe.sha256" -Encoding ascii -NoNewline
           $pre = @()
           if ("${{ github.ref_name }}".Contains("-")) { $pre = @("--prerelease") }
-          gh release create "${{ github.ref_name }}" $exe "$exe.sha256" --title "Blip $env:VERSION" --generate-notes @pre
+          # the Hoops add-on: downloaded only by people who get it in the shop
+          $game = "dist/blip-hoops-windows-x64.exe"
+          Copy-Item rust/target/release/blip-hoops.exe $game
+          $gh = (Get-FileHash $game -Algorithm SHA256).Hash.ToLower()
+          "$gh  blip-hoops-windows-x64.exe" | Out-File -FilePath "$game.sha256" -Encoding ascii -NoNewline
+          gh release create "${{ github.ref_name }}" $exe "$exe.sha256" $game "$game.sha256" --title "Blip $env:VERSION" --generate-notes @pre
 
   mac:
     needs: build
@@ -163,7 +168,11 @@ jobs:
           cd dist
           ditto -c -k --sequesterRsrc --keepParent Blip.app Blip-mac-arm64.zip
           shasum -a 256 Blip-mac-arm64.zip > Blip-mac-arm64.zip.sha256
-          gh release upload "$TAG" Blip-mac-arm64.zip Blip-mac-arm64.zip.sha256 --clobber
+          # the Hoops add-on, ad-hoc signed like the app
+          cp ../rust/target/release/blip-hoops blip-hoops-mac-arm64
+          codesign --force -s - blip-hoops-mac-arm64
+          shasum -a 256 blip-hoops-mac-arm64 > blip-hoops-mac-arm64.sha256
+          gh release upload "$TAG" Blip-mac-arm64.zip Blip-mac-arm64.zip.sha256 blip-hoops-mac-arm64 blip-hoops-mac-arm64.sha256 --clobber
 
   server:
     # The Rust Blip server as a single static Linux binary (runs on any x86-64 Linux, NAS or VPS)

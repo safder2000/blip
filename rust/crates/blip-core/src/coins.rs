@@ -9,6 +9,8 @@ pub enum Kind {
     Face,
     /// used up when used
     Pill,
+    /// a little game, downloaded only by people who get it
+    Game,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -20,7 +22,7 @@ pub struct Item {
     pub about: &'static str,
 }
 
-pub const ITEMS: [Item; 12] = [
+pub const ITEMS: [Item; 13] = [
     Item { id: "pick1", name: "Wooden pickaxe", kind: Kind::Pick(1), price: 15, about: "Digs up 2 coins now and then." },
     Item { id: "pick2", name: "Stone pickaxe", kind: Kind::Pick(2), price: 150, about: "Digs up 3 coins a time." },
     Item { id: "pick3", name: "Gold pickaxe", kind: Kind::Pick(3), price: 450, about: "Digs up 5 coins a time." },
@@ -33,7 +35,11 @@ pub const ITEMS: [Item; 12] = [
     Item { id: "crown", name: "Crown", kind: Kind::Head, price: 1500, about: "For the very dedicated." },
     Item { id: "energy", name: "Energy pill", kind: Kind::Pill, price: 20, about: "+40 Energy right away." },
     Item { id: "dream", name: "Sleep pill", kind: Kind::Pill, price: 15, about: "Use while it sleeps: this nap recovers 3x faster." },
+    Item { id: "hoops", name: "Hoops", kind: Kind::Game, price: 60, about: "Sling your pet at a hoop. Ten balls a game." },
 ];
+
+/// Coins a game can give in an hour at most (baskets pay 1 each).
+pub const GAME_COINS_PER_HOUR: u64 = 20;
 
 /// Curios that sometimes turn up while digging: (id, name). The gem is also worth GEM_COINS.
 pub const FINDS: [(&str, &str); 5] = [("cap", "Bottle cap"), ("key", "Old key"), ("shell", "Snail shell"), ("fossil", "Fossil"), ("gem", "Gem")];

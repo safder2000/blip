@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/blip-proto", "crates/blip-server", "crates/blip-pet", "crates/blip-core", "crates/blip-ui", "crates/blip-app"]
 
 [workspace.package]
-version = "0.9.1"
+version = "0.10.0"
 edition = "2021"
 license = "MIT"
 

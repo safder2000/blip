@@ -1304,7 +1304,7 @@ fn buddies_ui(ui: &mut Ui, t: &Theme, app: &mut App, el: &ActiveEventLoop, s: &m
                             }
                             gui::muted(ui, t, &txt);
                         });
-                        if p.pick > 0 || p.finds > 0 {
+                        if p.pick > 0 || p.finds > 0 || p.hoops > 0 {
                             let mut flex = String::new();
                             if p.pick > 0 {
                                 flex += &format!("{} pickaxe", blip_core::coins::PICK_NAMES[p.pick as usize]);
@@ -1314,6 +1314,12 @@ fn buddies_ui(ui: &mut Ui, t: &Theme, app: &mut App, el: &ActiveEventLoop, s: &m
                                     flex += "  \u{b7}  ";
                                 }
                                 flex += &format!("{} find{}", p.finds, if p.finds == 1 { "" } else { "s" });
+                            }
+                            if p.hoops > 0 {
+                                if !flex.is_empty() {
+                                    flex += "  \u{b7}  ";
+                                }
+                                flex += &format!("Hoops best {}", p.hoops);
                             }
                             ui.horizontal(|ui| {
                                 gui::icon(ui, "pick", gui::px(ui, 1.2), c(blip_pet::sprites::pick_color(p.pick.max(1))));
@@ -1679,6 +1685,53 @@ fn shop_ui(ui: &mut Ui, t: &Theme, app: &mut App, s: &mut ShopPage) {
             ui.add_space(4.0);
         }
 
+        // games: downloaded only when someone gets one
+        gui::section(ui, t, "Games");
+        for it in ITEMS.iter().filter(|i| i.kind == It::Game) {
+            let owned = app.pet.owns(it.id);
+            gui::card(ui, t, 10, |ui| {
+                ui.horizontal(|ui| {
+                    gui::icon(ui, "hoop", gui::px(ui, 2.0), c(0xff7a1a));
+                    ui.vertical(|ui| {
+                        gui::bold(ui, it.name);
+                        gui::muted(ui, t, it.about);
+                        if owned && app.pet.hoops_best() > 0 {
+                            gui::muted(ui, t, &format!("Best {}", app.pet.hoops_best()));
+                        }
+                    });
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if !owned {
+                            if gui::button(ui, t, &it.price.to_string(), Some("coin"), Kind::Soft, true, wallet >= it.price).clicked() {
+                                act = Some(("buy".into(), it.id.into()));
+                            }
+                            return;
+                        }
+                        match app.addons.hoops() {
+                            crate::addons::State::Ready => {
+                                if gui::button(ui, t, "Play", Some("playtri"), Kind::Primary, true, app.pet.hatched()).clicked() {
+                                    act = Some(("play".into(), it.id.into()));
+                                }
+                            }
+                            crate::addons::State::Downloading => {
+                                gui::muted(ui, t, "Getting it\u{2026}");
+                            }
+                            crate::addons::State::Failed(_) | crate::addons::State::Missing => {
+                                if gui::button(ui, t, "Get", Some("update"), Kind::Soft, true, true).clicked() {
+                                    act = Some(("fetch".into(), it.id.into()));
+                                }
+                            }
+                        }
+                    });
+                });
+                if let crate::addons::State::Failed(e) = app.addons.hoops() {
+                    if owned {
+                        gui::colored(ui, &format!("Couldn't download it ({e})."), t.danger, 12.0);
+                    }
+                }
+            });
+            ui.add_space(4.0);
+        }
+
         // finds shelf
         gui::section(ui, t, "Finds");
         let finds = app.pet.finds();
@@ -1688,16 +1741,18 @@ fn shop_ui(ui: &mut Ui, t: &Theme, app: &mut App, s: &mut ShopPage) {
             ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
             for (id, name) in coins::FINDS {
                 let n = finds.get(id).and_then(Value::as_u64).unwrap_or(0);
-                gui::card(ui, t, 8, |ui| {
-                    ui.set_width(84.0);
-                    ui.vertical_centered(|ui| {
-                        if n > 0 {
-                            gui::bold(ui, name);
-                            gui::muted(ui, t, &format!("\u{d7}{n}"));
-                        } else {
-                            gui::bold(ui, "?");
-                            gui::muted(ui, t, "not yet");
-                        }
+                ui.allocate_ui_with_layout(Vec2::new(104.0, 64.0), Layout::top_down(Align::Center), |ui| {
+                    gui::card(ui, t, 8, |ui| {
+                        ui.set_width(86.0);
+                        ui.vertical_centered(|ui| {
+                            if n > 0 {
+                                gui::bold(ui, name);
+                                gui::muted(ui, t, &format!("\u{d7}{n}"));
+                            } else {
+                                gui::bold(ui, "?");
+                                gui::muted(ui, t, "not yet");
+                            }
+                        });
                     });
                 });
             }
@@ -1708,7 +1763,21 @@ fn shop_ui(ui: &mut Ui, t: &Theme, app: &mut App, s: &mut ShopPage) {
     if let Some((verb, id)) = act {
         s.err.clear();
         let r = match verb.as_str() {
-            "buy" => app.pet.buy(&id),
+            "buy" => {
+                let r = app.pet.buy(&id);
+                if r.is_ok() && coins::item(&id).map(|i| i.kind) == Some(It::Game) {
+                    app.addons.fetch_hoops(); // only now: nobody else downloads it
+                }
+                r
+            }
+            "play" => {
+                app.play_hoops();
+                Ok(())
+            }
+            "fetch" => {
+                app.addons.fetch_hoops();
+                Ok(())
+            }
             "use" => app.pet.use_pill(&id),
             "wear" => {
                 app.pet.wear(&id);

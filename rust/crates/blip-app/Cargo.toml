@@ -11,6 +11,11 @@ build = "build.rs"
 name = "blip"
 path = "src/main.rs"
 
+# the Hoops add-on: built with Blip, but shipped as its own download for people who get it
+[[bin]]
+name = "blip-hoops"
+path = "src/hoops/main.rs"
+
 [dependencies]
 blip-pet = { path = "../blip-pet" }
 blip-ui = { path = "../blip-ui" }

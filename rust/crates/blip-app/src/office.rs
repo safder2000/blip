@@ -88,6 +88,9 @@ fn profile(app: &App) -> Map<String, Value> {
         m.insert("owned".into(), json!(app.pet.owned()));
         m.insert("pick".into(), json!(app.pet.pick()));
         m.insert("finds".into(), json!(app.pet.finds().len()));
+        if app.pet.hoops_best() > 0 {
+            m.insert("hoops".into(), json!(app.pet.hoops_best()));
+        }
     }
     m
 }

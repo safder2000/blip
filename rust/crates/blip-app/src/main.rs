@@ -4,6 +4,7 @@
 
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod addons;
 mod app;
 mod basecamp;
 mod cards;

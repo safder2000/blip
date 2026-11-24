@@ -752,6 +752,14 @@ impl Pet {
                 self.set_owned(o);
             }
             Kind::Pill => self.set_pills(id, self.pills(id) + 1),
+            Kind::Game => {
+                if self.owns(id) {
+                    return Err("Already yours".into());
+                }
+                let mut o = self.owned();
+                o.push(id.into());
+                self.set_owned(o);
+            }
         }
         self.set_bag("coins", json!(self.coins() - item.price));
         if matches!(item.kind, Kind::Head | Kind::Face) {
@@ -883,6 +891,29 @@ impl Pet {
                 self.events.push(Ev::Dig { coins: coins::dig_yield(self.pick()), find });
             }
         }
+    }
+
+    /// Best game of Hoops so far.
+    pub fn hoops_best(&self) -> u64 {
+        self.bag_u64("hoops_best")
+    }
+
+    /// A game of Hoops ended: a coin a basket (at most a few an hour), and the best score.
+    /// Returns (coins given, new best?).
+    pub fn game_over(&mut self, score: u64, now: f64) -> (u64, bool) {
+        let hour = (now / 3600.0) as u64;
+        let (h, got) = (self.bag_u64("game_hour"), self.bag_u64("game_hour_coins"));
+        let got = if h == hour { got } else { 0 };
+        let give = score.min(coins::GAME_COINS_PER_HOUR.saturating_sub(got));
+        self.set_bag("game_hour", json!(hour));
+        self.set_bag("game_hour_coins", json!(got + give));
+        let best = score > self.hoops_best();
+        if best {
+            self.set_bag("hoops_best", json!(score));
+        }
+        self.set_bag("coins", json!(self.coins() + give));
+        self.save();
+        (give, best)
     }
 
     /// Test hook: make the next find / dig due now.

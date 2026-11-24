@@ -62,6 +62,19 @@ Pickaxes replace each other (no selling). One hat and one pair of glasses can be
 the pet chirps once when it puts on something new. Wearables show in every pose except the
 curled-up ball. Wallet, wardrobe and finds belong to the person: they carry over to a new egg.
 
+## Games
+
+Games are add-ons: they are **not** part of Blip. Only someone who gets one in the shop downloads
+it (from the GitHub release matching their Blip, checked against its SHA-256); everyone else
+never has it on disk, and nothing runs until it's played.
+
+**Hoops** (60 coins). The pet curls into its ball and sits in a slingshot on the ground at the
+left of the screen. Pull it back, let go, and get it through a hoop hanging on the right edge of
+the monitor (a new height after every basket; always within reach). Ten balls a game; the score
+is a small quiet label next to the hoop. Right-click, or the little x by the score, stops.
+A basket pays 1 coin (at most 20 coins an hour from games); buddies see your best score.
+It runs as its own small program (`blip-hoops`), and Blip hides its pet while you play.
+
 ## Finds shelf
 
 Rare curios from digging: bottle cap, old key, snail shell, fossil, gem. Shown on a shelf in the
