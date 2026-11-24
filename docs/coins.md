@@ -68,7 +68,7 @@ Games are add-ons: they are **not** part of Blip. Only someone who gets one in t
 it (from the GitHub release matching their Blip, checked against its SHA-256); everyone else
 never has it on disk, and nothing runs until it's played.
 
-**Hoops** (60 coins). The pet curls into its ball and sits in a slingshot on the ground at the
+**Hoops** (4 coins). The pet curls into its ball and sits in a slingshot on the ground at the
 left of the screen. Pull it back, let go, and get it through a hoop hanging on the right edge of
 the monitor (a new height after every basket; always within reach). Ten balls a game; the score
 is a small quiet label next to the hoop. Right-click, or the little x by the score, stops.

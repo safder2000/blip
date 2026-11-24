@@ -35,7 +35,7 @@ pub const ITEMS: [Item; 13] = [
     Item { id: "crown", name: "Crown", kind: Kind::Head, price: 1500, about: "For the very dedicated." },
     Item { id: "energy", name: "Energy pill", kind: Kind::Pill, price: 20, about: "+40 Energy right away." },
     Item { id: "dream", name: "Sleep pill", kind: Kind::Pill, price: 15, about: "Use while it sleeps: this nap recovers 3x faster." },
-    Item { id: "hoops", name: "Hoops", kind: Kind::Game, price: 60, about: "Sling your pet at a hoop. Ten balls a game." },
+    Item { id: "hoops", name: "Hoops", kind: Kind::Game, price: 4, about: "Sling your pet at a hoop. Ten balls a game." },
 ];
 
 /// Coins a game can give in an hour at most (baskets pay 1 each).
