@@ -88,6 +88,12 @@ and makes its own way back (strolling, dashing, hopping, rolling, seeing stars f
 after a basket...: something a little different every time) and hops back in. There's only one
 pet: Blip's own pet is the one playing, and it's back on the taskbar where the game ended.
 
+While you pull, a few dots show the start of the path it'll take. A leather grip on the
+slingshot's trunk sets the power: slide it up for harder shots, down for gentler ones (the little
+notches beside it go from green to red); Blip remembers it. Once the ball has touched the ground
+you can pick the pet up: drop it on the slingshot and it's straight back in the pouch, or
+anywhere else and it walks back from there. No sad faces in a game, whatever its stats.
+
 No end: play as long as you like. Right-click, or the little x by the score, stops. Drag the
 slingshot by its wood onto another screen to play there. The score is a small quiet label by the
 hoop. Each basket pops a coin out of the net that flies up to the score (1 coin a basket, at most

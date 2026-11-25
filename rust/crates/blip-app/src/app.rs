@@ -895,6 +895,7 @@ impl App {
         c.args(["--species", self.pet.species(), "--palette", &self.pet.palette(), "--stage", &stage])
             .args(["--wear", &self.pet.wearing().join(","), "--best", &self.pet.hoops_best().to_string(), "--at", &format!("{x:.0},{y:.0}")])
             .args(["--coins-left", &left.to_string(), "--size", &self.size().to_string()])
+            .args(["--power", &format!("{:.2}", self.cfg.v.get("hoops_power").and_then(Value::as_f64).unwrap_or(0.5))])
             .stdout(std::process::Stdio::piped())
             .stdin(std::process::Stdio::null());
         if let Ok(extra) = std::env::var("BLIP_HOOPS_ARGS") {
@@ -940,6 +941,9 @@ impl App {
             } else if let Some(score) = v.get("score").and_then(Value::as_u64) {
                 let f = |k: &str| v.get(k).and_then(Value::as_f64).unwrap_or(f64::NAN);
                 self.game_end = Some((score.min(9999), f("x"), f("y")));
+                if let Some(pw) = v.get("power").and_then(Value::as_f64) {
+                    self.cfg.set("hoops_power", json!((pw.clamp(0.0, 1.0) * 100.0).round() / 100.0));
+                }
             }
         }
     }

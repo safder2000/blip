@@ -64,6 +64,17 @@ const WOOD_D: u32 = 0x5e3b1a;
 const BAND: u32 = 0x7a2a1a;
 const OUT: u32 = 0x2b2340;
 const MUTED: u32 = 0xb8b0c8;
+const LEATHER: u32 = 0x7a3f1f;
+const LEATHER_HI: u32 = 0x9a5a32;
+
+/// green (gentle) through yellow to red (hard)
+fn power_color(k: f64) -> u32 {
+    let mix = |a: u32, b: u32, t: f64| {
+        let ch = |s: u32| (((a >> s) & 255) as f64 * (1.0 - t) + ((b >> s) & 255) as f64 * t).round() as u32;
+        (ch(16) << 16) | (ch(8) << 8) | ch(0)
+    };
+    if k < 0.5 { mix(0x5ec46a, 0xf2c94c, k * 2.0) } else { mix(0xf2c94c, 0xe5484d, (k - 0.5) * 2.0) }
+}
 /// rows of room above the pet's grid in its window (ears, stars, cheer hops)
 const HEAD: i32 = 10;
 
@@ -82,6 +93,10 @@ struct Args {
     move_to: Option<(f64, f64)>,
     /// tests: walk back with these routines, in turn
     routines: Vec<usize>,
+    /// the slingshot's power setting, 0..1 (remembered by Blip between games)
+    power: f64,
+    /// tests: pick the pet up after it lands (first time: drop it on the ground; then: on the sling)
+    carry: bool,
 }
 
 fn point(s: &str) -> Option<(f64, f64)> {
@@ -103,6 +118,8 @@ fn args() -> Args {
         shots: None,
         move_to: None,
         routines: vec![],
+        power: 0.5,
+        carry: false,
     };
     let v: Vec<String> = std::env::args().collect();
     let mut i = 1;
@@ -120,6 +137,12 @@ fn args() -> Args {
             "--at" => a.at = point(&next).unwrap_or(a.at),
             "--move-to" => a.move_to = point(&next),
             "--routines" => a.routines = next.split(',').filter_map(|x| x.parse().ok()).collect(),
+            "--power" => a.power = next.parse::<f64>().unwrap_or(0.5).clamp(0.0, 1.0),
+            "--carry" => {
+                a.carry = true;
+                i += 1;
+                continue;
+            }
             "--auto" => {
                 a.auto = true;
                 i += 1;
@@ -148,6 +171,10 @@ enum Phase {
     Flying,
     /// stopping: hopping down out of the pouch (since)
     Leaving(f64),
+    /// picked up after it landed, held by the mouse at this offset from its feet
+    Carried((f64, f64)),
+    /// let go of somewhere off the slingshot: dropping to the ground
+    Falling,
 }
 
 /// One bit of what the pet does on the ground. Speeds are screen px a second at 100%.
@@ -193,6 +220,8 @@ struct Game {
     sling_cv: Canvas,
     hoop_win: Overlay,
     pet_win: Overlay,
+    /// a short dotted line showing where a pull would send it
+    aim_win: Overlay,
     close_rect: (i32, i32, i32, i32),
     phase: Phase,
     pull: (f64, f64),
@@ -215,6 +244,16 @@ struct Game {
     /// auto player: aiming since (to show the pulled slingshot for a moment)
     aiming: Option<f64>,
     moved_once: bool,
+    /// the power grip on the trunk is being slid
+    adjusting: bool,
+    /// the grip, on screen (for grabbing it)
+    grip_rect: (f64, f64, f64, f64),
+    /// the ball has touched the ground since it was shot (then it can be picked up)
+    landed: bool,
+    /// the pet's feet height while carried or dropping, and its fall speed
+    py: f64,
+    drop_vy: f64,
+    carries: u32,
     /// cursor offset into the slingshot's window while dragging it
     grab: (f64, f64),
     // ---- the pet on the ground
@@ -251,6 +290,7 @@ impl Game {
         let sling = Overlay::new(el, 10, 10, 0, 0, true)?;
         let hoop_win = Overlay::new(el, 10, 10, 0, 0, true)?;
         let pet_win = Overlay::new(el, 10, 10, 0, 0, true)?;
+        let aim_win = Overlay::new(el, 10, 10, 0, 0, true)?;
         let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(7) | 1;
         let hoop = Hoop { x: 0.0, y: 0.0, w: 1.0, board_h: 1.0, board_left: false };
         let mut g = Game {
@@ -270,6 +310,7 @@ impl Game {
             sling_cv: Canvas::new(1, 1),
             hoop_win,
             pet_win,
+            aim_win,
             close_rect: (0, 0, 0, 0),
             phase: Phase::Walking,
             pull: (0.0, 0.0),
@@ -290,6 +331,12 @@ impl Game {
             done: false,
             aiming: None,
             moved_once: false,
+            adjusting: false,
+            grip_rect: (0.0, 0.0, 0.0, 0.0),
+            landed: false,
+            py: 0.0,
+            drop_vy: 0.0,
+            carries: 0,
             grab: (0.0, 0.0),
             px: 0.0,
             dir: -1,
@@ -462,6 +509,26 @@ impl Game {
         cv.rect(fx + trunk_w / 2 - p, fork.1 as i32, fx + trunk_w / 2, floor as i32, WOOD_D);
         Self::thick_line(&mut cv, (fork.0, fork.1), tips[1], 2 * p, WOOD);
         Self::thick_line(&mut cv, tips[1], pouch, p, BAND);
+        // the power grip: a leather wrap that slides along the trunk, with a column of little
+        // notches beside it going from green (gentle) to red (hard)
+        let (g_top, g_bot) = self.gauge(fork.1, floor);
+        let notch_x = fx - trunk_w / 2 - p / 2 - 2 * p;
+        let mut y = g_bot;
+        while y >= g_top {
+            let k = ((g_bot - y) / (g_bot - g_top)).clamp(0.0, 1.0);
+            cv.rect(notch_x, y as i32, notch_x + p, y as i32 + p.max(2) / 2 + 1, power_color(k));
+            y -= 2.0 * pf;
+        }
+        let gy = g_bot - self.a.power * (g_bot - g_top);
+        let (wx0, wx1) = (fx - trunk_w / 2 - p, fx + trunk_w / 2 + p);
+        let (wy0, wy1) = (gy as i32 - p - p / 2, gy as i32 + p + p / 2);
+        cv.rect(wx0 - p / 2, wy0 - p / 2, wx1 + p / 2, wy1 + p / 2, OUT);
+        cv.rect(wx0, wy0, wx1, wy1, LEATHER);
+        cv.rect(wx0, wy0, wx1, wy0 + p / 2, LEATHER_HI);
+        cv.rect(fx - p / 2, gy as i32 - p / 2, fx + p / 2 + (p % 2), gy as i32 + p / 2 + (p % 2), power_color(self.a.power));
+        let o = (self.sling_at.0 as f64, self.sling_at.1 as f64);
+        let pad = 4.0 * pf;
+        self.grip_rect = (o.0 + wx0 as f64 - pad, o.1 + wy0 as f64 - pad, o.0 + wx1 as f64 + pad, o.1 + wy1 as f64 + pad);
         // a little grass tuft at its foot
         for (dx, h) in [(-3, 2), (-2, 3), (2, 3), (3, 2), (4, 1)] {
             let x = fx + dx * p;
@@ -588,6 +655,58 @@ impl Game {
         }
     }
 
+    /// While pulling: a few dots along the start of the path it would take (just the first
+    /// stretch, shrinking and fading, not the whole way).
+    fn draw_aim(&mut self) {
+        let aiming = self.phase == Phase::Pulling || (self.phase == Phase::Ready && self.aiming.is_some());
+        let (dx, dy) = (self.anchor.0 - self.pull.0, self.anchor.1 - self.pull.1);
+        if !aiming || dx.hypot(dy) < 18.0 * self.s {
+            self.aim_win.hide();
+            return;
+        }
+        let k = self.vk * self.power_k();
+        let (vx, vy) = (dx * k, dy * k);
+        let g = self.sim.g;
+        // dots every 0.03 s of flight, for about the first 0.2 s: a short hint, not the whole way
+        let pts: Vec<(f64, f64)> = (1..=6)
+            .map(|i| {
+                let t = 0.033 * i as f64;
+                (self.pull.0 + vx * t, self.pull.1 + vy * t + 0.5 * g * t * t)
+            })
+            .filter(|p| p.1 < self.work.bottom - self.sim.r * 0.5)
+            .collect();
+        if pts.is_empty() {
+            self.aim_win.hide();
+            return;
+        }
+        let p = self.p;
+        let pf = p as f64;
+        let pad = 3.0 * pf;
+        let (x0, y0) = (pts.iter().map(|q| q.0).fold(f64::MAX, f64::min) - pad, pts.iter().map(|q| q.1).fold(f64::MAX, f64::min) - pad);
+        let (x1, y1) = (pts.iter().map(|q| q.0).fold(f64::MIN, f64::max) + pad, pts.iter().map(|q| q.1).fold(f64::MIN, f64::max) + pad);
+        let mut cv = Canvas::new((x1 - x0) as i32 + 1, (y1 - y0) as i32 + 1);
+        let put = |cv: &mut Canvas, x0: i32, y0: i32, x1: i32, y1: i32, c: u32, a: u32| {
+            let m = |v: u32| v * a / 255;
+            let px = (a << 24) | (m((c >> 16) & 255) << 16) | (m((c >> 8) & 255) << 8) | m(c & 255);
+            for y in y0.max(0)..y1.min(cv.h) {
+                for x in x0.max(0)..x1.min(cv.w) {
+                    cv.px[(y * cv.w + x) as usize] = px;
+                }
+            }
+        };
+        for (i, (x, y)) in pts.iter().enumerate() {
+            // pixel dots: bigger and brighter near the slingshot, smaller and fainter further out
+            let size = if i < 2 { 2 * p } else if i < 4 { p + p / 2 } else { p };
+            let a = (235 - i as u32 * 30).max(80);
+            let (cx, cy) = ((x - x0) as i32 - size / 2, (y - y0) as i32 - size / 2);
+            let o = (p / 2).max(1);
+            put(&mut cv, cx - o, cy - o, cx + size + o, cy + size + o, OUT, a);
+            put(&mut cv, cx, cy, cx + size, cy + size, 0xffffff, a);
+        }
+        self.aim_win.present(&cv, x0 as i32, y0 as i32);
+        shot("aim", &cv);
+    }
+
     /// The pet's own window: the pet on the ground, in the air, or the ball in flight.
     fn draw_pet(&mut self, now: f64) {
         let p = self.p;
@@ -615,6 +734,10 @@ impl Game {
                     let dir = if b.0 < a.0 { -1 } else { 1 };
                     (self.pet_sprite("happy", dir, false), x, y + self.sim.r, false, !up && k > 0.9)
                 }
+            }
+            Phase::Carried(_) | Phase::Falling => {
+                let wiggle = if (now * 6.0) as i64 % 2 == 0 { -1 } else { 1 };
+                (self.pet_sprite("happy", if self.phase == Phase::Falling { 0 } else { wiggle }, false), self.px, self.py, false, false)
             }
             Phase::Walking => match self.plan.front().copied() {
                 Some(Step::Roll { .. }) => (self.ball_sprite(self.roll_spin, 0.0), self.px, floor + 0.5 * pf, false, false),
@@ -713,7 +836,11 @@ impl Game {
                 Step::Pose { secs: 0.9, mood: "happy", face: 0, shake: false, stars: false, cheer: true },
                 Step::Walk { speed: 520.0, hop: 6.0, part: 1.0, mood: "happy" },
             ],
-            _ => vec![pose(0.8, "sad"), walk(300.0, "sad")],
+            // after a miss: a look up at the hoop, then hopping back for another go
+            _ => vec![
+                Step::Pose { secs: 0.7, mood: "normal", face: 1, shake: false, stars: false, cheer: false },
+                Step::Walk { speed: 470.0, hop: 10.0, part: 1.0, mood: "normal" },
+            ],
         };
         log(&format!("walks back: routine {k}"));
         r
@@ -828,22 +955,13 @@ impl Game {
                     match e {
                         Ev::Score => self.basket(now),
                         Ev::Rim | Ev::Board => self.shake = now,
-                        Ev::Bounce(_) => self.squash_until = now + 0.08,
+                        Ev::Bounce(_) => {
+                            self.squash_until = now + 0.08;
+                            self.landed = true;
+                        }
                         Ev::Stop => {
-                            // it gets up where it stopped and makes its way back
-                            self.px = self.sim.x;
-                            self.roll_spin = self.sim.spin;
-                            let scored = self.sim.scored;
-                            self.plan = VecDeque::from(self.routine(scored));
-                            self.step_t0 = now;
-                            self.goal = None;
-                            self.walked = 0.0;
-                            self.dir = if self.stand_x() < self.px { -1 } else { 1 };
-                            self.phase = Phase::Walking;
-                            if scored {
-                                self.place_hoop();
-                            }
-                            self.draw_hoop();
+                            self.landed = true;
+                            self.ball_done(now);
                         }
                     }
                 }
@@ -854,6 +972,47 @@ impl Game {
                     self.done = true;
                 }
             }
+            Phase::Carried(off) => {
+                let (mx, my) = platform::cursor();
+                self.px = mx - off.0;
+                self.py = (my - off.1).min(self.work.bottom);
+                if !platform::left_button_down() {
+                    self.drop_pet(now);
+                }
+            }
+            Phase::Falling => {
+                self.drop_vy += 1500.0 * self.s * dt;
+                self.py += self.drop_vy * dt;
+                if self.py >= self.work.bottom {
+                    self.py = self.work.bottom;
+                    self.phase = Phase::Walking;
+                    self.plan = VecDeque::from(vec![pose(0.25, "happy"), walk(480.0, "happy")]);
+                    self.step_t0 = now;
+                    self.goal = None;
+                    self.walked = 0.0;
+                    self.dir = if self.stand_x() < self.px { -1 } else { 1 };
+                }
+            }
+        }
+        // sliding the power grip
+        if self.adjusting {
+            let (_, my) = platform::cursor();
+            let (top, bot) = self.gauge_screen();
+            self.a.power = ((bot - my) / (bot - top)).clamp(0.0, 1.0);
+            if !platform::left_button_down() {
+                self.adjusting = false;
+                log(&format!("power {:.2}", self.a.power));
+            }
+        }
+        // test: pick it up after it lands
+        if self.a.auto && self.a.carry && self.phase == Phase::Walking && self.shots > self.carries {
+            self.carries += 1;
+            self.py = self.work.bottom;
+            self.phase = Phase::Carried((0.0, 0.0));
+            let (x, y) = if self.carries == 1 { (self.px - 120.0 * self.s, self.work.bottom - 220.0 * self.s) } else { (self.anchor.0, self.anchor.1 + self.sim.r) };
+            self.px = x;
+            self.py = y;
+            self.drop_pet(now);
         }
         // coins reach the label
         let arrived = self.coin_fx.iter().filter(|c| now - c.t0 >= 0.9).count() as u32;
@@ -861,9 +1020,64 @@ impl Game {
         let busy_coins = self.coin_fx.iter().any(|c| now - c.t0 < 1.1);
         self.draw_sling(now);
         self.draw_pet(now);
+        self.draw_aim();
         if now - self.swish < 0.8 || now - self.shake < 0.25 || now - self.pop < 0.45 || busy_coins {
             self.draw_hoop();
         }
+    }
+
+    /// The shot is over: it gets up where it stopped and makes its way back.
+    fn ball_done(&mut self, now: f64) {
+        self.sim.flying = false;
+        self.px = self.sim.x;
+        self.roll_spin = self.sim.spin;
+        let scored = self.sim.scored;
+        self.plan = VecDeque::from(self.routine(scored));
+        self.step_t0 = now;
+        self.goal = None;
+        self.walked = 0.0;
+        self.dir = if self.stand_x() < self.px { -1 } else { 1 };
+        self.phase = Phase::Walking;
+        if scored {
+            self.place_hoop();
+        }
+        self.draw_hoop();
+    }
+
+    /// Let go of the carried pet: on the slingshot it goes straight into the pouch; anywhere
+    /// else it drops to the ground and walks back from there.
+    fn drop_pet(&mut self, now: f64) {
+        let centre = (self.px, self.py - 7.5 * self.p as f64);
+        if (centre.0 - self.anchor.0).hypot(centre.1 - self.anchor.1) < 80.0 * self.s {
+            self.phase = Phase::Ready;
+            self.pull = self.anchor;
+            self.settled = now;
+            self.plan.clear();
+            log("carried back to the slingshot");
+        } else {
+            self.drop_vy = 0.0;
+            self.phase = Phase::Falling;
+            log("dropped on the way");
+        }
+    }
+
+    /// The power grip's track along the trunk (slingshot window px): (top, bottom).
+    fn gauge(&self, fork_y: f64, floor: f64) -> (f64, f64) {
+        let pf = self.p as f64;
+        (fork_y + 4.0 * pf, floor - 6.0 * pf)
+    }
+
+    /// The same, on screen.
+    fn gauge_screen(&self) -> (f64, f64) {
+        let fork_y = self.anchor_off.1 + 7.0 * self.p as f64;
+        let floor = self.sling_cv.h.max(1) as f64;
+        let (a, b) = self.gauge(fork_y, floor);
+        (a + self.sling_at.1 as f64, b + self.sling_at.1 as f64)
+    }
+
+    /// Launch speed for the power setting: 60% to 140% of normal.
+    fn power_k(&self) -> f64 {
+        0.6 + 0.8 * self.a.power
     }
 
     fn basket(&mut self, now: f64) {
@@ -900,7 +1114,8 @@ impl Game {
             self.phase = Phase::Ready;
             return;
         }
-        let (vx, vy) = (dx * self.vk, dy * self.vk);
+        let k = self.vk * self.power_k();
+        let (vx, vy) = (dx * k, dy * k);
         self.fire(now, vx, vy);
     }
 
@@ -909,6 +1124,7 @@ impl Game {
         self.sim.spin = 0.0;
         self.shots += 1;
         self.released = now;
+        self.landed = false;
         self.phase = Phase::Flying;
         log(&format!("shot {} v=({vx:.0},{vy:.0})", self.shots));
     }
@@ -922,6 +1138,10 @@ impl Game {
                 self.phase = Phase::Leaving(now);
             }
             Phase::Leaving(_) => {}
+            Phase::Carried(_) | Phase::Falling => {
+                self.py = self.work.bottom;
+                self.done = true;
+            }
             Phase::Flying => {
                 self.px = self.sim.x;
                 self.done = true;
@@ -961,6 +1181,25 @@ impl Game {
                 let now = self.now();
                 self.stop(now);
             }
+            return;
+        }
+        let (gx0, gy0, gx1, gy1) = self.grip_rect;
+        if id == self.sling.id() && mx >= gx0 && mx <= gx1 && my >= gy0 && my <= gy1 && !matches!(self.phase, Phase::Pulling | Phase::Moving) {
+            self.adjusting = true;
+            return;
+        }
+        if id == self.pet_win.id() && (self.phase == Phase::Walking || (self.phase == Phase::Flying && self.landed)) {
+            // picked up: carry it back (or anywhere)
+            let now = self.now();
+            if self.phase == Phase::Flying {
+                let feet = self.sim.y + self.sim.r;
+                self.ball_done(now);
+                self.py = feet;
+            } else {
+                self.py = self.work.bottom;
+            }
+            self.phase = Phase::Carried((mx - self.px, my - self.py));
+            log("picked up");
             return;
         }
         if id == self.sling.id() && self.phase == Phase::Ready {
@@ -1020,7 +1259,7 @@ impl ApplicationHandler for Runner {
         g.tick();
         if g.done {
             if !std::mem::replace(&mut self.reported, true) {
-                say(&format!("{{\"score\":{},\"shots\":{},\"x\":{:.0},\"y\":{:.0}}}", g.score, g.shots, g.px, g.work.bottom - 2.0));
+                say(&format!("{{\"score\":{},\"shots\":{},\"x\":{:.0},\"y\":{:.0},\"power\":{:.2}}}", g.score, g.shots, g.px, g.work.bottom - 2.0, g.a.power));
             }
             el.exit();
             return;
