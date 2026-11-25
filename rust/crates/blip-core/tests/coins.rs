@@ -79,3 +79,21 @@ fn the_bag_survives_a_new_egg() {
     assert_eq!(p.coins(), 20);
     assert!(p.owns("shades"));
 }
+
+#[test]
+fn game_coins_are_one_a_basket_and_capped_each_hour() {
+    let mut p = grown_pet("game");
+    let t = 7200.0 * 10.0;
+    assert_eq!(p.game_coins_left(t), blip_core::coins::GAME_COINS_PER_HOUR);
+    let mut paid = 0;
+    for _ in 0..30 {
+        if p.game_coin(t) {
+            paid += 1;
+        }
+    }
+    assert_eq!(paid, blip_core::coins::GAME_COINS_PER_HOUR);
+    assert_eq!(p.coins(), paid);
+    assert_eq!(p.game_coins_left(t + 10.0), 0);
+    assert!(p.game_coin(t + 3600.0), "a new hour pays again");
+    assert!(p.game_best(14) && !p.game_best(9) && p.hoops_best() == 14);
+}

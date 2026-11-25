@@ -436,7 +436,7 @@ fn handle(sh: &Shared, d: Map<String, Value>, ip: Option<String>, via: &str, key
             p.owned = ids(body.get("owned"));
             p.pick = body.get("pick").and_then(Value::as_u64).unwrap_or(0).min(4) as u8;
             p.finds = body.get("finds").and_then(Value::as_u64).unwrap_or(0).min(99) as u32;
-            p.hoops = body.get("hoops").and_then(Value::as_u64).unwrap_or(0).min(10) as u32;
+            p.hoops = body.get("hoops").and_then(Value::as_u64).unwrap_or(0).min(9999) as u32;
             p.port = body.get("port").and_then(Value::as_u64).filter(|v| *v > 0 && *v < 65536).unwrap_or(TCP_PORT as u64) as u16;
             p.seen = now();
             p.voice = body.get("voice").and_then(Value::as_bool).unwrap_or(false);

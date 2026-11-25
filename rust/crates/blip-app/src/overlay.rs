@@ -83,7 +83,9 @@ impl Overlay {
     }
 
     pub fn hide(&mut self) {
-        self.window.set_visible(false);
+        if self.shown {
+            self.surface.hide(&self.window);
+        }
         self.shown = false;
     }
 

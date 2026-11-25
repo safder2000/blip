@@ -118,6 +118,11 @@ pub struct App {
     pub addons: crate::addons::Addons,
     /// a game running (its own process), and one waiting for its download
     game: Option<std::process::Child>,
+    /// lines the game prints ({"coin":1} per paid basket, {"score":..} at the end), read on a thread
+    game_rx: Option<std::sync::mpsc::Receiver<String>>,
+    /// coins this game paid, and where its pet ended up
+    game_coins: u64,
+    game_end: Option<(u64, f64, f64)>,
     game_wanted: bool,
     next_coin_uid: u64,
     /// the coin the pet is walking over to
@@ -211,6 +216,9 @@ impl App {
             coins_floor: vec![],
             addons: crate::addons::Addons::new(&dir),
             game: None,
+            game_rx: None,
+            game_coins: 0,
+            game_end: None,
             game_wanted: false,
             next_coin_uid: 0,
             walking_to: None,
@@ -781,25 +789,59 @@ impl App {
 
     fn launch_hoops(&mut self) {
         let path = self.addons.hoops_path();
-        let (x, y) = (self.body.x + self.geo.w as f64 / 2.0, self.body.y + self.geo.h as f64 / 2.0);
+        // the pet's feet: the game's pet starts right there and walks over to the slingshot
+        let (x, y) = (self.body.x + self.geo.w as f64 / 2.0, self.body.y + self.geo.h as f64 - 4.0);
+        let left = self.pet.game_coins_left(blip_core::now());
         let stage = if self.pet.stage() == "egg" { "baby".to_string() } else { self.pet.stage().to_string() };
         let mut c = std::process::Command::new(&path);
         c.args(["--species", self.pet.species(), "--palette", &self.pet.palette(), "--stage", &stage])
             .args(["--wear", &self.pet.wearing().join(","), "--best", &self.pet.hoops_best().to_string(), "--at", &format!("{x:.0},{y:.0}")])
+            .args(["--coins-left", &left.to_string()])
             .stdout(std::process::Stdio::piped())
             .stdin(std::process::Stdio::null());
         if let Ok(extra) = std::env::var("BLIP_HOOPS_ARGS") {
             c.args(extra.split_whitespace()); // tests: --auto
         }
         match c.spawn() {
-            Ok(ch) => {
+            Ok(mut ch) => {
                 crate::log("hoops started");
+                let (tx, rx) = std::sync::mpsc::channel();
+                if let Some(out) = ch.stdout.take() {
+                    std::thread::spawn(move || {
+                        use std::io::BufRead;
+                        for line in std::io::BufReader::new(out).lines().map_while(Result::ok) {
+                            if tx.send(line).is_err() {
+                                break;
+                            }
+                        }
+                    });
+                }
+                self.game_rx = Some(rx);
+                self.game_coins = 0;
+                self.game_end = None;
                 self.game = Some(ch);
                 self.menu = None;
             }
             Err(e) => {
                 crate::log(&format!("hoops didn't start: {e}"));
                 self.addons.remove_hoops();
+            }
+        }
+    }
+
+    /// What the game said: a coin for each basket as it happens, and its score at the end.
+    fn game_lines(&mut self) {
+        let Some(rx) = self.game_rx.as_ref() else { return };
+        let lines: Vec<String> = rx.try_iter().collect();
+        for l in lines {
+            let Ok(v) = serde_json::from_str::<Value>(&l) else { continue };
+            if v.get("coin").is_some() {
+                if self.pet.game_coin(blip_core::now()) {
+                    self.game_coins += 1;
+                }
+            } else if let Some(score) = v.get("score").and_then(Value::as_u64) {
+                let f = |k: &str| v.get(k).and_then(Value::as_f64).unwrap_or(f64::NAN);
+                self.game_end = Some((score.min(9999), f("x"), f("y")));
             }
         }
     }
@@ -814,31 +856,44 @@ impl App {
             crate::addons::State::Failed(_) => self.game_wanted = false,
             _ => {}
         }
+        if self.game.is_none() {
+            return;
+        }
+        self.game_lines();
         let Some(ch) = self.game.as_mut() else { return };
         if matches!(ch.try_wait(), Ok(None)) {
             return;
         }
-        let mut out = String::new();
-        if let Some(mut so) = ch.stdout.take() {
-            use std::io::Read;
-            let _ = so.read_to_string(&mut out);
-        }
+        // it ended: whatever it said last, then the pet comes back where the game left it
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        self.game_lines();
         self.game = None;
-        let score = out
-            .lines()
-            .find_map(|l| serde_json::from_str::<Value>(l).ok())
-            .and_then(|v| v.get("score").and_then(Value::as_u64))
-            .unwrap_or(0)
-            .min(10);
-        let (coins, best) = self.pet.game_over(score, blip_core::now());
-        crate::log(&format!("hoops over: {score} baskets, +{coins} coins, best {}", self.pet.hoops_best()));
+        self.game_rx = None;
+        let (score, x, y) = self.game_end.take().unwrap_or((0, f64::NAN, f64::NAN));
+        let best = self.pet.game_best(score);
+        crate::log(&format!("hoops over: {score} baskets, +{} coins, best {}", self.game_coins, self.pet.hoops_best()));
+        if x.is_finite() && y.is_finite() {
+            let (work, scale) = platform::work_area_at(x, y);
+            self.work = work;
+            if (scale.max(1.0) - self.geo.s).abs() > 0.01 {
+                self.geo = Geo::new(scale);
+                self.body.scale_hint = self.geo.s;
+            }
+            self.body.x = x - self.geo.w as f64 / 2.0;
+            self.body.y = Body::ground(&self.geo, &work);
+            self.body.vx = 0.0;
+            self.body.vy = 0.0;
+            self.body.airborne = false;
+            self.body.goal = None;
+            self.body.set(Action::Idle, 1.5, self.now());
+        }
         if best && score > 0 {
             self.chirp("wow", None, 3.0);
         } else if score > 0 {
             self.chirp("happy", None, 2.5);
         }
-        if coins > 0 {
-            self.spawn("coin", coins.min(3) as u32);
+        if self.game_coins > 0 {
+            self.spawn("coin", self.game_coins.min(3) as u32);
         }
         self.windows_dirty = true;
     }

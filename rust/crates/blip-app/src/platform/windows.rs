@@ -14,7 +14,7 @@ use windows_sys::Win32::Graphics::Gdi::{
 use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetCursorPos, GetWindowLongPtrW, GetWindowRect, SetWindowLongPtrW, SetWindowPos, ShowWindow, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, UpdateLayeredWindow, GWL_EXSTYLE, SW_SHOWNOACTIVATE,
+    GetCursorPos, GetWindowLongPtrW, GetWindowRect, SetWindowLongPtrW, SetWindowPos, ShowWindow, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, UpdateLayeredWindow, GWL_EXSTYLE, SW_HIDE, SW_SHOWNOACTIVATE,
     ULW_ALPHA, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
@@ -145,6 +145,13 @@ impl Surface {
         }
         window.set_visible(true);
         true
+    }
+
+    /// Hide it. Windows shown with `show` above never told winit they're visible, so winit's own
+    /// set_visible(false) would do nothing for them: hide the window directly too.
+    pub fn hide(&mut self, window: &winit::window::Window) {
+        window.set_visible(false);
+        unsafe { ShowWindow(self.hwnd, SW_HIDE) };
     }
 
     /// Windows already lets clicks through see-through pixels of a layered window.

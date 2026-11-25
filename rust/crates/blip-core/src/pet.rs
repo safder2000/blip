@@ -898,22 +898,35 @@ impl Pet {
         self.bag_u64("hoops_best")
     }
 
-    /// A game of Hoops ended: a coin a basket (at most a few an hour), and the best score.
-    /// Returns (coins given, new best?).
-    pub fn game_over(&mut self, score: u64, now: f64) -> (u64, bool) {
+    /// Coins games can still give this hour (a basket pays 1, at most GAME_COINS_PER_HOUR an hour).
+    pub fn game_coins_left(&self, now: f64) -> u64 {
         let hour = (now / 3600.0) as u64;
-        let (h, got) = (self.bag_u64("game_hour"), self.bag_u64("game_hour_coins"));
-        let got = if h == hour { got } else { 0 };
-        let give = score.min(coins::GAME_COINS_PER_HOUR.saturating_sub(got));
+        let got = if self.bag_u64("game_hour") == hour { self.bag_u64("game_hour_coins") } else { 0 };
+        coins::GAME_COINS_PER_HOUR.saturating_sub(got)
+    }
+
+    /// A basket in a game: one coin, if this hour's game coins aren't used up. True if paid.
+    pub fn game_coin(&mut self, now: f64) -> bool {
+        if self.game_coins_left(now) == 0 {
+            return false;
+        }
+        let hour = (now / 3600.0) as u64;
+        let got = if self.bag_u64("game_hour") == hour { self.bag_u64("game_hour_coins") } else { 0 };
         self.set_bag("game_hour", json!(hour));
-        self.set_bag("game_hour_coins", json!(got + give));
+        self.set_bag("game_hour_coins", json!(got + 1));
+        self.set_bag("coins", json!(self.coins() + 1));
+        self.save();
+        true
+    }
+
+    /// A game of Hoops ended with `score` baskets. True if that's a new best.
+    pub fn game_best(&mut self, score: u64) -> bool {
         let best = score > self.hoops_best();
         if best {
             self.set_bag("hoops_best", json!(score));
+            self.save();
         }
-        self.set_bag("coins", json!(self.coins() + give));
-        self.save();
-        (give, best)
+        best
     }
 
     /// Test hook: make the next find / dig due now.

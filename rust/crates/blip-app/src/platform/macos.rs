@@ -48,6 +48,10 @@ impl Surface {
         true
     }
 
+    pub fn hide(&mut self, window: &winit::window::Window) {
+        window.set_visible(false);
+    }
+
     /// Show `pixels` (premultiplied 0xAARRGGBB, w x h physical) with the top-left at (x, y) physical.
     pub fn present(&mut self, pixels: &[u32], w: i32, h: i32, x: i32, y: i32) {
         self.scale = self.window.scale_factor();

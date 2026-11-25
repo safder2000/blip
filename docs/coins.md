@@ -68,12 +68,19 @@ Games are add-ons: they are **not** part of Blip. Only someone who gets one in t
 it (from the GitHub release matching their Blip, checked against its SHA-256); everyone else
 never has it on disk, and nothing runs until it's played.
 
-**Hoops** (4 coins). The pet curls into its ball and sits in a slingshot on the ground at the
-left of the screen. Pull it back, let go, and get it through a hoop hanging on the right edge of
-the monitor (a new height after every basket; always within reach). Ten balls a game; the score
-is a small quiet label next to the hoop. Right-click, or the little x by the score, stops.
-A basket pays 1 coin (at most 20 coins an hour from games); buddies see your best score.
-It runs as its own small program (`blip-hoops`), and Blip hides its pet while you play.
+**Hoops** (4 coins). The pet walks over to a slingshot standing on the ground at the left of the
+screen, hops in and curls into its ball. Pull it back, let go, and get it through a hoop hanging
+on the right edge of the monitor; after every basket the hoop moves to a new height, anywhere from
+near the ground to near the top (always within reach). Wherever the ball lands, the pet gets up
+and makes its own way back (strolling, dashing, hopping, rolling, seeing stars first, a cheer
+after a basket...: something a little different every time) and hops back in. There's only one
+pet: Blip's own pet is the one playing, and it's back on the taskbar where the game ended.
+
+No end: play as long as you like. Right-click, or the little x by the score, stops. Drag the
+slingshot by its wood onto another screen to play there. The score is a small quiet label by the
+hoop. Each basket pops a coin out of the net that flies up to the score (1 coin a basket, at most
+20 coins an hour from games); buddies see your best score. It runs as its own small program
+(`blip-hoops`).
 
 ## Finds shelf
 
