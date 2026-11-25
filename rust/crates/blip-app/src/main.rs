@@ -6,6 +6,8 @@
 
 mod addons;
 mod app;
+mod area;
+mod basket;
 mod basecamp;
 mod cards;
 mod gui;

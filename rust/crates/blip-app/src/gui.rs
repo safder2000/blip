@@ -622,6 +622,36 @@ pub fn bar(ui: &mut Ui, t: &Theme, width: f32, frac: f32, col: Color) {
     }
 }
 
+/// A slider that snaps to `steps`, with the value as a percentage. Returns the new value.
+pub fn step_slider(ui: &mut Ui, t: &Theme, value: f64, steps: &[f64], width: f32) -> Option<f64> {
+    let label_w = 44.0;
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(width + label_w, 24.0), Sense::click_and_drag());
+    let track = Rect::from_min_max(Pos2::new(rect.min.x + 8.0, rect.center().y - 2.0), Pos2::new(rect.min.x + width - 8.0, rect.center().y + 2.0));
+    let n = steps.len().max(2) - 1;
+    let pos = |i: usize| track.min.x + track.width() * i as f32 / n as f32;
+    let cur = steps.iter().enumerate().min_by(|a, b| (a.1 - value).abs().total_cmp(&(b.1 - value).abs())).map(|(i, _)| i).unwrap_or(0);
+    ui.painter().rect_filled(track, CornerRadius::same(2), c(t.track));
+    let filled = Rect::from_min_max(track.min, Pos2::new(pos(cur), track.max.y));
+    ui.painter().rect_filled(filled, CornerRadius::same(2), c(t.accent));
+    for i in 0..=n {
+        ui.painter().circle_filled(Pos2::new(pos(i), track.center().y), 2.0, c(if i <= cur { t.accent } else { t.line }));
+    }
+    let k = Pos2::new(pos(cur), track.center().y);
+    ui.painter().circle_filled(k, 8.0, c(t.knob));
+    ui.painter().circle_stroke(k, 8.0, Stroke::new(1.5, c(t.accent)));
+    ui.painter().text(Pos2::new(rect.max.x, rect.center().y), egui::Align2::RIGHT_CENTER, format!("{:.0}%", steps[cur] * 100.0), FontId::proportional(12.5), c(t.muted));
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    let p = resp.interact_pointer_pos()?;
+    if !(resp.clicked() || resp.dragged() || resp.drag_started()) {
+        return None;
+    }
+    let f = ((p.x - track.min.x) / track.width()).clamp(0.0, 1.0);
+    let i = (f * n as f32).round() as usize;
+    (i != cur).then(|| steps[i])
+}
+
 /// The centred "nothing here" message.
 pub fn empty_state(ui: &mut Ui, t: &Theme, title: &str, text: &str) {
     ui.add_space(14.0);

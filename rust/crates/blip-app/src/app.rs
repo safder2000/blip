@@ -115,6 +115,10 @@ pub struct App {
     pub cards: CardStack,
     poops: Vec<PoopWin>,
     coins_floor: Vec<CoinWin>,
+    /// the basket from the shop, when it's out on the taskbar
+    pub basket: Option<crate::basket::Basket>,
+    /// Settings -> Keep to an area: its editor, while open
+    pub gizmo: Option<crate::area::Gizmo>,
     pub addons: crate::addons::Addons,
     /// a game running (its own process), and one waiting for its download
     game: Option<std::process::Child>,
@@ -168,6 +172,12 @@ pub struct App {
     pub update_state: Option<(&'static str, String)>,
 }
 
+/// The pet's size setting (Settings -> Size): 0.5 to 2, 1 = normal.
+fn size_of(cfg: &Config) -> f64 {
+    let v = cfg.f64("size");
+    if v <= 0.0 { 1.0 } else { v.clamp(0.5, 2.0) }
+}
+
 fn look_of(pet: &Pet) -> Look {
     let stage = match pet.stage() {
         "child" => Stage::Child,
@@ -188,7 +198,7 @@ impl App {
         }
         let saved_x = pet.st.get("x").and_then(Value::as_f64);
         let (work, scale) = platform::work_area_at(saved_x.unwrap_or(f64::MAX), 500.0);
-        let geo = Geo::new(scale);
+        let geo = Geo::new(scale.max(1.0) * size_of(&cfg));
         let x = saved_x.unwrap_or(work.right - geo.w as f64 - 140.0 * scale);
         let mut body = Body::new(x, Body::ground(&geo, &work), blip_core::Rng::new().f().to_bits());
         body.wander = pet.st.get("wander").and_then(Value::as_bool).unwrap_or(true);
@@ -214,6 +224,8 @@ impl App {
             cards: CardStack::default(),
             poops: vec![],
             coins_floor: vec![],
+            basket: None,
+            gizmo: None,
             addons: crate::addons::Addons::new(&dir),
             game: None,
             game_rx: None,
@@ -256,6 +268,7 @@ impl App {
             startup_on: platform::startup_enabled(),
             update_state: None,
         };
+        app.cards.size = app.size();
         if app.pet.gone() {
             app.body.set(Action::Gone, 1e18, 0.0);
         } else if app.pet.asleep() {
@@ -266,6 +279,71 @@ impl App {
 
     pub fn now(&self) -> f64 {
         self.t0.elapsed().as_secs_f64()
+    }
+
+    // ------------------------------------------------ size (Settings -> Size)
+    pub fn size(&self) -> f64 {
+        size_of(&self.cfg)
+    }
+
+    /// Sizes for a screen with scale `monitor_scale`, at the size setting.
+    pub fn geo_for(&self, monitor_scale: f64) -> Geo {
+        Geo::new(monitor_scale.max(1.0) * self.size())
+    }
+
+    pub fn set_size(&mut self, v: f64) {
+        self.cfg.set("size", json!((v.clamp(0.5, 2.0) * 100.0).round() / 100.0));
+        let (cx, cy) = (self.body.x + self.geo.w as f64 / 2.0, self.body.y + self.geo.h as f64 - 2.0);
+        let g = self.geo_for(platform::work_area_at(cx, cy).1);
+        self.refit(g);
+        self.cards.size = self.size();
+        self.menu = None;
+    }
+
+    /// Switch to new sizes, keeping the pet standing where it was.
+    pub fn refit(&mut self, g: Geo) {
+        let old = self.geo;
+        self.body.x += (old.w - g.w) as f64 / 2.0;
+        self.body.y += (old.h - g.h) as f64;
+        self.geo = g;
+        self.body.scale_hint = g.s;
+        self.redraw_floor();
+        crate::basket::refit(self);
+    }
+
+    /// Poops and coins on the taskbar, drawn again at the current size.
+    fn redraw_floor(&mut self) {
+        let p = self.geo.p;
+        for pw in self.poops.iter_mut().filter(|w| w.gone_at.is_none()) {
+            let cv = scene::poop(p);
+            let (work, _) = platform::work_area_at(pw.x, pw.win.y as f64 + pw.win.h as f64 - 2.0);
+            pw.win.present(&cv, (pw.x - cv.w as f64 / 2.0) as i32, work.bottom as i32 - cv.h);
+        }
+        for c in self.coins_floor.iter_mut().filter(|c| c.gone_at.is_none()) {
+            let cv = coin_canvas(p, 0.0);
+            let bottom = c.win.y + c.win.h;
+            c.win.present(&cv, (c.x - cv.w as f64 / 2.0) as i32, bottom - cv.h);
+        }
+    }
+
+    pub fn visible_pub(&self) -> bool {
+        self.visible()
+    }
+
+    pub fn gone(&self) -> bool {
+        self.pet.gone()
+    }
+
+    pub fn spawn_pub(&mut self, kind: &'static str, n: u32) {
+        self.spawn(kind, n);
+    }
+
+    pub fn face_pub(&self, now: f64) -> &'static str {
+        self.face(now)
+    }
+
+    pub fn close_menu(&mut self) {
+        self.menu = None;
     }
 
     fn visible(&self) -> bool {
@@ -418,9 +496,9 @@ impl App {
             let (cx, cy) = (self.body.x + self.geo.w as f64 / 2.0, self.body.y + self.geo.h as f64 - 2.0);
             let (work, scale) = platform::work_area_at(cx, cy);
             self.work = work;
-            if (scale.max(1.0) - self.geo.s).abs() > 0.01 {
-                self.geo = Geo::new(scale);
-                self.body.scale_hint = self.geo.s;
+            let g = self.geo_for(scale);
+            if (g.s - self.geo.s).abs() > 0.01 {
+                self.refit(g);
             }
             self.next_work = now + 0.5;
         }
@@ -443,6 +521,9 @@ impl App {
             self.sim(el, now);
             self.next_sim = now + 1.0;
         }
+        crate::basket::arrived(self);
+        crate::basket::tick(self, el);
+        crate::area::tick(self);
         self.draw_pet(now);
         self.poop_tick(now);
         self.coin_tick(now);
@@ -522,7 +603,9 @@ impl App {
         }
         self.body.slow = self.pet.b("sick");
         let before = self.body.action;
-        self.body.step(&self.geo, &self.work, t);
+        if !crate::basket::pet_inside(self) {
+            self.body.step(&self.geo, &self.work, t);
+        }
         if self.pending_dig.is_some() && self.body.action != Action::Dig {
             self.finish_dig();
         }
@@ -625,6 +708,7 @@ impl App {
                 self.body.set(Action::Eat, secs, now);
             }
             BodyCmd::Play { secs } => {
+                crate::basket::hop_out(self);
                 self.body.set(Action::Play, secs, now);
                 self.body.jump();
             }
@@ -707,7 +791,20 @@ impl App {
         } else {
             self.canvas.clear();
         }
-        self.canvas.sprite(&g, geo.ox, geo.bub_h, geo.p);
+        if crate::basket::pet_inside(self) {
+            if !crate::basket::calm(self) {
+                if let Some(w) = self.pet_win.as_mut() {
+                    w.hide();
+                }
+                return;
+            }
+            // the basket draws the pet; just its particles, bubbles and signs here
+            let mut only: blip_pet::sprites::Sprite = Default::default();
+            scene::add_particles(&mut only, &self.parts);
+            self.canvas.sprite(&only, geo.ox, geo.bub_h, geo.p);
+        } else {
+            self.canvas.sprite(&g, geo.ox, geo.bub_h, geo.p);
+        }
         let f = Frame { w: geo.w, ox: geo.ox, bub_h: geo.bub_h, p: geo.p, s: geo.s, top_row: self.top_row };
         self.board_rect = None;
         self.sign_rect = None;
@@ -788,6 +885,7 @@ impl App {
     }
 
     fn launch_hoops(&mut self) {
+        crate::basket::hop_out(self);
         let path = self.addons.hoops_path();
         // the pet's feet: the game's pet starts right there and walks over to the slingshot
         let (x, y) = (self.body.x + self.geo.w as f64 / 2.0, self.body.y + self.geo.h as f64 - 4.0);
@@ -796,7 +894,7 @@ impl App {
         let mut c = std::process::Command::new(&path);
         c.args(["--species", self.pet.species(), "--palette", &self.pet.palette(), "--stage", &stage])
             .args(["--wear", &self.pet.wearing().join(","), "--best", &self.pet.hoops_best().to_string(), "--at", &format!("{x:.0},{y:.0}")])
-            .args(["--coins-left", &left.to_string()])
+            .args(["--coins-left", &left.to_string(), "--size", &self.size().to_string()])
             .stdout(std::process::Stdio::piped())
             .stdin(std::process::Stdio::null());
         if let Ok(extra) = std::env::var("BLIP_HOOPS_ARGS") {
@@ -875,9 +973,11 @@ impl App {
         if x.is_finite() && y.is_finite() {
             let (work, scale) = platform::work_area_at(x, y);
             self.work = work;
-            if (scale.max(1.0) - self.geo.s).abs() > 0.01 {
-                self.geo = Geo::new(scale);
-                self.body.scale_hint = self.geo.s;
+            let g = self.geo_for(scale);
+            if (g.s - self.geo.s).abs() > 0.01 {
+                self.geo = g;
+                self.body.scale_hint = g.s;
+                self.redraw_floor();
             }
             self.body.x = x - self.geo.w as f64 / 2.0;
             self.body.y = Body::ground(&self.geo, &work);
@@ -906,7 +1006,7 @@ impl App {
             self.busy_check = (now + 5.0, platform::fullscreen_busy());
         }
         let away = platform::idle_secs() > 300.0;
-        self.pet.earn_ok = self.coins_on() && self.game.is_none() && !away && !self.busy_check.1 && !self.cfg.bool("dnd") && !crate::office::in_call(self);
+        self.pet.earn_ok = self.coins_on() && self.game.is_none() && !crate::basket::pet_inside(self) && !away && !self.busy_check.1 && !self.cfg.bool("dnd") && !crate::office::in_call(self);
     }
 
     pub fn coins_on(&self) -> bool {
@@ -985,7 +1085,7 @@ impl App {
             self.body.goal = None;
         }
         // go and pick one up
-        let free = matches!(self.body.action, Action::Idle | Action::Walk) && !self.body.airborne && self.body.goal.is_none();
+        let free = matches!(self.body.action, Action::Idle | Action::Walk) && !self.body.airborne && self.body.goal.is_none() && !crate::basket::pet_inside(self);
         if self.walking_to.is_none() && free && self.pet.hatched() && !self.pet.asleep() && !self.pet.gone() {
             if let Some(c) = self.coins_floor.iter().find(|c| c.gone_at.is_none() && now >= c.pick_at) {
                 let (lo, hi) = Body::bounds(&self.geo, &self.work);
@@ -1108,6 +1208,7 @@ impl App {
 
     // ------------------------------------------------ ringing
     pub fn start_alert(&mut self, key: &str, sound: &'static str, dash: bool) {
+        crate::basket::hop_out(self); // something's ringing: out it comes to tell you
         self.alerts.retain(|(k, _)| k != key);
         self.alerts.push((key.to_string(), sound));
         self.play_sound(sound, true);
@@ -1299,6 +1400,13 @@ impl App {
         if self.coins_on() && pet.owns("hoops") {
             extra.push(Item::row("hoop", "Hoops", "game:hoops"));
         }
+        if self.basket.is_some() && hatched {
+            if crate::basket::pet_inside(self) {
+                extra.push(Item::row("basket", "Out of the basket", "basket:out"));
+            } else {
+                extra.push(Item::row("basket", "Into the basket", "basket:in"));
+            }
+        }
         if !extra.is_empty() {
             if !items.is_empty() {
                 items.push(Item::Sep);
@@ -1435,6 +1543,14 @@ impl App {
             }
             return;
         }
+        if crate::basket::owns(self, id) {
+            crate::basket::event(self, el, &event);
+            return;
+        }
+        if crate::area::owns(self, id) {
+            crate::area::event(self, id, &event);
+            return;
+        }
         if let Some(i) = self.poops.iter().position(|p| p.win.id() == id) {
             if let WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. } = event {
                 if self.poops[i].gone_at.is_none() {
@@ -1470,6 +1586,9 @@ impl App {
                 if inside(self.sign_rect) {
                     self.want_window.push("timers".into());
                     return;
+                }
+                if crate::basket::pet_inside(self) {
+                    return; // the basket takes it
                 }
                 let now = self.now();
                 self.body.press(mx, my, now);
@@ -1572,6 +1691,17 @@ impl App {
                 self.cfg.set("dnd", json!(on));
                 self.board(if on { "Do not disturb" } else { "DND off" }, 3.0);
                 self.windows_dirty = true;
+            }
+            ["basket", "in"] => crate::basket::go_in(self),
+            ["basket", "out"] => crate::basket::hop_out(self),
+            ["basket", "show"] => crate::basket::set_out(self, true),
+            ["basket", "hide"] => crate::basket::set_out(self, false),
+            ["area", "edit"] => {
+                if self.gizmo.is_some() {
+                    crate::area::close(self);
+                } else {
+                    crate::area::open(self, el);
+                }
             }
             ["wander"] => {
                 self.body.wander = !self.body.wander;
@@ -1757,6 +1887,40 @@ impl App {
                 let peers: Vec<String> = crate::office::peers(self).iter().map(|p| format!("{}({}, owns {:?})", p.name, p.id, p.owned)).collect();
                 crate::log(&format!("net: {} | server {:?} | peers {peers:?}", crate::office::status(self).0, crate::office::server_status(self)));
             }
+            "basket:swing" => crate::basket::test_swing(self),
+            "basket:drop" => {
+                // drop the pet from above the basket
+                if let Some(b) = self.basket.as_ref() {
+                    self.body.x = b.x - self.geo.w as f64 / 2.0;
+                    self.body.y = b.y - 260.0 * self.geo.s - self.geo.h as f64;
+                    self.body.vy = 0.0;
+                    self.body.airborne = true;
+                    let now = self.now();
+                    self.body.set(Action::Fall, 1e18, now);
+                }
+            }
+            w if w.starts_with("size:") => {
+                let v: f64 = w["size:".len()..].parse().unwrap_or(1.0);
+                self.set_size(v);
+            }
+            w if w.starts_with("area:on:") => {
+                // area:on:x0,x1 (the pet's centre, on the screen it's on)
+                let v: Vec<f64> = w["area:on:".len()..].split(',').filter_map(|x| x.parse().ok()).collect();
+                if v.len() == 2 {
+                    self.cfg.v.insert("area".into(), json!([v[0], v[1], self.work.bottom]));
+                    self.cfg.set("area_on", json!(true));
+                }
+            }
+            "area:edit" => crate::area::open(self, el),
+            w if w.starts_with("pet:at:") => {
+                // put the pet at x (centre), falling from a little above the ground
+                let x: f64 = w["pet:at:".len()..].parse().unwrap_or(500.0);
+                self.body.x = x - self.geo.w as f64 / 2.0;
+                self.body.y -= 100.0 * self.geo.s;
+                self.body.airborne = true;
+                let now = self.now();
+                self.body.set(Action::Fall, 1e18, now);
+            }
             w if w.starts_with("coins:add:") => {
                 let n: u64 = w["coins:add:".len()..].parse().unwrap_or(0);
                 self.pet.add_coins(n);
@@ -1766,6 +1930,7 @@ impl App {
     }
 
     pub fn shutdown(&mut self) {
+        crate::area::close(self);
         if let Some(mut g) = self.game.take() {
             let _ = g.kill();
         }

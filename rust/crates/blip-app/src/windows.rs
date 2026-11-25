@@ -734,6 +734,28 @@ fn page_general(ui: &mut Ui, t: &Theme, app: &mut App, el: &ActiveEventLoop, s: 
         if gui::toggle_row(ui, t, "Wander around", "Let your pet walk along the bottom of the screen.", &mut wander) {
             app.run(el, "wander");
         }
+        gui::hline(ui, t);
+        let mut area_on = crate::area::on(app);
+        if gui::toggle_row(ui, t, "Keep to an area", "Pick a stretch of the taskbar for it. Thrown somewhere else, it walks back.", &mut area_on) {
+            crate::area::switch(app, el, area_on);
+        }
+        if area_on {
+            ui.add_space(4.0);
+            let editing = app.gizmo.is_some();
+            if gui::button(ui, t, if editing { "Done" } else { "Adjust the area" }, None, Kind::Soft, true, true).clicked() {
+                app.run(el, "area:edit");
+            }
+        }
+        gui::hline(ui, t);
+        gui::setting_row_w(ui, t, "Size", "Your pet and everything around it.", 300.0, |ui| {
+            let size = app.size();
+            if gui::button(ui, t, "Reset", None, Kind::Soft, true, (size - 1.0).abs() > 0.001).clicked() {
+                app.set_size(1.0);
+            }
+            if let Some(v) = gui::step_slider(ui, t, size, &[0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0], 170.0) {
+                app.set_size(v);
+            }
+        });
     });
     gui::section(ui, t, "Updates");
     gui::card(ui, t, 14, |ui| {
@@ -1685,6 +1707,36 @@ fn shop_ui(ui: &mut Ui, t: &Theme, app: &mut App, s: &mut ShopPage) {
             ui.add_space(4.0);
         }
 
+        // things for the taskbar
+        gui::section(ui, t, "Things");
+        for it in ITEMS.iter().filter(|i| i.kind == It::Thing) {
+            let owned = app.pet.owns(it.id);
+            let out = crate::basket::wanted(app);
+            gui::card(ui, t, 10, |ui| {
+                ui.horizontal(|ui| {
+                    gui::icon(ui, "basket", gui::px(ui, 2.0), c(0xc88a4a));
+                    ui.vertical(|ui| {
+                        gui::bold(ui, it.name);
+                        gui::muted(ui, t, it.about);
+                    });
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if !owned {
+                            if gui::button(ui, t, &it.price.to_string(), Some("coin"), Kind::Soft, true, wallet >= it.price).clicked() {
+                                act = Some(("buy".into(), it.id.into()));
+                            }
+                        } else if out {
+                            if gui::button(ui, t, "Put away", None, Kind::Soft, true, true).clicked() {
+                                act = Some(("basket-hide".into(), it.id.into()));
+                            }
+                        } else if gui::button(ui, t, "Put out", None, Kind::Primary, true, true).clicked() {
+                            act = Some(("basket-show".into(), it.id.into()));
+                        }
+                    });
+                });
+            });
+            ui.add_space(4.0);
+        }
+
         // games: downloaded only when someone gets one
         gui::section(ui, t, "Games");
         for it in ITEMS.iter().filter(|i| i.kind == It::Game) {
@@ -1772,6 +1824,10 @@ fn shop_ui(ui: &mut Ui, t: &Theme, app: &mut App, s: &mut ShopPage) {
             }
             "play" => {
                 app.play_hoops();
+                Ok(())
+            }
+            "basket-show" | "basket-hide" => {
+                crate::basket::set_out(app, verb == "basket-show");
                 Ok(())
             }
             "fetch" => {

@@ -57,6 +57,8 @@ pub struct ShowCard<'a> {
 #[derive(Default)]
 pub struct CardStack {
     pub cards: Vec<CardWin>,
+    /// the pet's size setting (cards grow with it, never shrink below the screen's own size)
+    pub size: f64,
 }
 
 /// What happened in a card, for the app: a command to run (button / close).
@@ -133,7 +135,7 @@ impl CardStack {
             if c.check_scale || x != c.win.x || cy != c.win.y {
                 c.check_scale = false;
                 let (cw, ch) = (c.card.w as f64, c.card.h as f64);
-                let scale = platform::work_area_at(x as f64 + cw / 2.0, cy as f64 + ch / 2.0).1.max(1.0);
+                let scale = platform::work_area_at(x as f64 + cw / 2.0, cy as f64 + ch / 2.0).1.max(1.0) * if self.size > 0.0 { self.size } else { 1.0 };
                 if (scale - c.card.scale()).abs() > 0.01 {
                     crate::log(&format!("card {} rescaled {} -> {scale}", c.key, c.card.scale()));
                     c.rescale(scale, fonts);

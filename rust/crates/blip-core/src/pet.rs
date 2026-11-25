@@ -752,7 +752,7 @@ impl Pet {
                 self.set_owned(o);
             }
             Kind::Pill => self.set_pills(id, self.pills(id) + 1),
-            Kind::Game => {
+            Kind::Game | Kind::Thing => {
                 if self.owns(id) {
                     return Err("Already yours".into());
                 }

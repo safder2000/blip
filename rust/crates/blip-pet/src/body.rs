@@ -37,9 +37,10 @@ pub struct Geo {
 }
 
 impl Geo {
+    /// `scale`: the screen's scale times the pet's size setting (0.5 = half size).
     pub fn new(scale: f64) -> Geo {
-        let s = scale.max(1.0);
-        let p = 3.max((4.0 * s).round() as i32);
+        let s = scale.max(0.5);
+        let p = 2.max((4.0 * s).round() as i32);
         let bub_h = (48.0 * s).round() as i32;
         let w = (GW * p).max((200.0 * s).round() as i32);
         Geo { s, p, w, h: bub_h + GH * p, ox: (w - GW * p) / 2, bub_h }
@@ -129,6 +130,9 @@ pub struct Body {
     /// walking over to this x (window left) to pick something up; `arrived` once there
     pub goal: Option<f64>,
     pub arrived: bool,
+    /// Settings -> Keep to an area: it wanders only between these x's (window left), and walks
+    /// back there after being thrown somewhere else
+    pub area: Option<(f64, f64)>,
     /// how it reacts to this landing, and which one it did last time
     pub landing: Landing,
     last_landing: Landing,
@@ -182,6 +186,7 @@ impl Body {
             jitter: 0.0,
             goal: None,
             arrived: false,
+            area: None,
             landing: Landing::Proud,
             last_landing: Landing::Proud,
             unfold_face: 0,
@@ -279,7 +284,30 @@ impl Body {
                             self.x += self.dir as f64 * step;
                         }
                     }
-                    Action::Walk => self.x += self.dir as f64 * if self.slow { 0.7 } else { 1.5 } * s,
+                    Action::Walk => {
+                        if let Some((a, b)) = self.area {
+                            // outside its area: head back; inside: turn around at its edges
+                            if self.x < a || (self.x <= a + 0.5 && self.dir < 0) {
+                                self.dir = 1;
+                            } else if self.x > b || (self.x >= b - 0.5 && self.dir > 0) {
+                                self.dir = -1;
+                            }
+                        }
+                        // a bit quicker on the way home
+                        let home = if self.away_from_area() { 2.0 } else { 1.0 };
+                        let step = if self.slow { 0.7 } else { 1.5 } * s * home;
+                        let mut nx = self.x + self.dir as f64 * step;
+                        if let Some((a, b)) = self.area {
+                            if self.x >= a - 0.5 && self.x <= b + 0.5 {
+                                nx = nx.clamp(a, b);
+                                if (b - a) < 1.0 {
+                                    // no room to walk: stand there
+                                    self.set(Action::Idle, 2.0, now);
+                                }
+                            }
+                        }
+                        self.x = nx;
+                    }
                     Action::Play if now < self.action_until => self.jump(),
                     Action::Unfold if self.landing == Landing::Shake => {
                         self.jitter = if ((now * 22.0) as i64) % 2 == 0 { 1.5 } else { -1.5 } * s;
@@ -507,7 +535,19 @@ impl Body {
         }
     }
 
+    /// Away from its area (thrown somewhere else)?
+    pub fn away_from_area(&self) -> bool {
+        self.area.map_or(false, |(a, b)| self.x < a - 1.0 || self.x > b + 1.0)
+    }
+
     fn choose(&mut self, now: f64) {
+        if self.away_from_area() {
+            // walk home, wandering on or not
+            let (a, b) = self.area.unwrap_or((self.x, self.x));
+            self.dir = if self.x < a { 1 } else if self.x > b { -1 } else { self.dir };
+            self.set(Action::Walk, 6.0, now);
+            return;
+        }
         if self.wander && self.random() < 0.55 {
             self.dir = if self.random() < 0.5 { -1 } else { 1 };
             let secs = 2.0 + self.random() * 4.0;

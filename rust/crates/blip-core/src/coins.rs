@@ -11,6 +11,8 @@ pub enum Kind {
     Pill,
     /// a little game, downloaded only by people who get it
     Game,
+    /// something for the taskbar (the basket)
+    Thing,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -22,7 +24,7 @@ pub struct Item {
     pub about: &'static str,
 }
 
-pub const ITEMS: [Item; 13] = [
+pub const ITEMS: [Item; 14] = [
     Item { id: "pick1", name: "Wooden pickaxe", kind: Kind::Pick(1), price: 15, about: "Digs up 2 coins now and then." },
     Item { id: "pick2", name: "Stone pickaxe", kind: Kind::Pick(2), price: 150, about: "Digs up 3 coins a time." },
     Item { id: "pick3", name: "Gold pickaxe", kind: Kind::Pick(3), price: 450, about: "Digs up 5 coins a time." },
@@ -36,6 +38,7 @@ pub const ITEMS: [Item; 13] = [
     Item { id: "energy", name: "Energy pill", kind: Kind::Pill, price: 20, about: "+40 Energy right away." },
     Item { id: "dream", name: "Sleep pill", kind: Kind::Pill, price: 15, about: "Use while it sleeps: this nap recovers 3x faster." },
     Item { id: "hoops", name: "Hoops", kind: Kind::Game, price: 4, about: "Sling your pet at a hoop." },
+    Item { id: "basket", name: "Basket", kind: Kind::Thing, price: 50, about: "A cosy basket to put your pet away in." },
 ];
 
 /// Coins a game can give in an hour at most (baskets pay 1 each).

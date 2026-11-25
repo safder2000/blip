@@ -74,6 +74,8 @@ struct Args {
     wear: Vec<String>,
     best: u32,
     coins_left: u32,
+    /// Blip's size setting: the whole game grows or shrinks with the pet
+    size: f64,
     at: (f64, f64),
     auto: bool,
     shots: Option<u32>,
@@ -95,6 +97,7 @@ fn args() -> Args {
         wear: vec![],
         best: 0,
         coins_left: 0,
+        size: 1.0,
         at: (800.0, 800.0),
         auto: false,
         shots: None,
@@ -112,6 +115,7 @@ fn args() -> Args {
             "--wear" => a.wear = next.split(',').filter(|s| !s.is_empty()).map(str::to_string).collect(),
             "--best" => a.best = next.parse().unwrap_or(0),
             "--coins-left" => a.coins_left = next.parse().unwrap_or(0),
+            "--size" => a.size = next.parse::<f64>().unwrap_or(1.0).clamp(0.5, 2.0),
             "--shots" => a.shots = next.parse().ok(),
             "--at" => a.at = point(&next).unwrap_or(a.at),
             "--move-to" => a.move_to = point(&next),
@@ -314,7 +318,7 @@ impl Game {
     /// Set the court up on the screen with work area `work`: slingshot on the left of its
     /// ground, hoop on its right edge.
     fn layout(&mut self, work: Rect, scale: f64) {
-        let s = scale.max(1.0);
+        let s = (scale.max(1.0) * self.a.size).max(0.5);
         self.geo = Geo::new(s);
         self.s = self.geo.s;
         self.p = self.geo.p;

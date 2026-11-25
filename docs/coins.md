@@ -62,6 +62,18 @@ Pickaxes replace each other (no selling). One hat and one pair of glasses can be
 the pet chirps once when it puts on something new. Wearables show in every pose except the
 curled-up ball. Wallet, wardrobe and finds belong to the person: they carry over to a new egg.
 
+## Things
+
+**Basket** (50 coins). Somewhere to put your pet away. It sits on the taskbar; drop or throw the
+pet in, or pick **Into the basket** in the menu and it walks over and hops in. Inside, just its
+head peeks over the rim; it doesn't wander or dig for coins while it's in there (alarms and
+games still bring it out). **Out of the basket** in the menu, or tip the basket over.
+
+Grab the basket anywhere and it hangs from that point under the mouse, swinging with how you
+move it. Let go and it flies off with that momentum, spinning, and lands upright, on its side
+or upside down depending on how it comes down. Tip it far enough and the pet tumbles out.
+"Put away" in the shop takes it off the taskbar.
+
 ## Games
 
 Games are add-ons: they are **not** part of Blip. Only someone who gets one in the shop downloads
