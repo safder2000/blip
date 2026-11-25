@@ -142,7 +142,8 @@ impl Sim {
                 self.vy = self.vy.abs() * 0.6;
             }
             // the ground (the taskbar line)
-            if self.y + self.r >= self.floor {
+            // (only when coming down: a ball launched low, touching the ground, still flies up)
+            if self.y + self.r >= self.floor && self.vy >= 0.0 {
                 self.y = self.floor - self.r;
                 if self.vy > 260.0 {
                     out.push(Ev::Bounce(self.vy));
@@ -250,6 +251,21 @@ mod tests {
         let mut s2 = s.clone();
         s2.launch(800.0, 950.0, vx, vy);
         assert!(run(&mut s2).contains(&Ev::Score));
+    }
+
+    #[test]
+    fn a_low_launch_touching_the_ground_still_flies() {
+        let mut s = court();
+        // pulled down so far the ball touches the ground, shot up steeply
+        s.launch(150.0, 1040.0 - 30.0 + 4.0, 700.0, -2000.0);
+        s.step(1.0 / 60.0);
+        assert!(s.vy < -1500.0, "kept its upward speed: {}", s.vy);
+        let mut top = s.y;
+        for _ in 0..120 {
+            s.step(1.0 / 60.0);
+            top = top.min(s.y);
+        }
+        assert!(top < 1040.0 - 900.0, "flew high: top {top}");
     }
 
     #[test]

@@ -321,8 +321,9 @@ impl Game {
         self.work = work;
         let r = 7.5 * self.p as f64;
         let floor = work.bottom;
-        self.anchor = (work.left + 150.0 * s, floor - 95.0 * s);
         self.pull_r = 115.0 * s;
+        // tall enough that pulling straight down never pushes the ball into the ground
+        self.anchor = (work.left + 150.0 * s, floor - self.pull_r - r - 8.0 * s);
         // the slingshot's window: room for the ball pulled back all the way
         let half = self.pull_r + r + 30.0 * s;
         self.sling_at = ((self.anchor.0 - half) as i32, (self.anchor.1 - half) as i32);
@@ -801,7 +802,9 @@ impl Game {
                 let (dx, dy) = (mx - self.anchor.0, my - self.anchor.1);
                 let d = dx.hypot(dy).max(1e-6);
                 let k = d.min(self.pull_r) / d;
-                self.pull = (self.anchor.0 + dx * k, self.anchor.1 + dy * k);
+                // never below the ground
+                let low = self.work.bottom - self.sim.r - 2.0 * self.s;
+                self.pull = (self.anchor.0 + dx * k, (self.anchor.1 + dy * k).min(low));
                 if !platform::left_button_down() {
                     self.release(now);
                 }
